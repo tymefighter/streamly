@@ -114,6 +114,9 @@ module Streamly.Streams.StreamD
     , foldlx'
     , foldlMx'
 
+    , parselMx'
+    , chained
+
     -- ** Specialized Folds
     , tap
     , drain
@@ -303,8 +306,9 @@ import qualified Control.Monad.Catch as MC
 
 import Streamly.Internal.Memory.Array.Types (Array(..))
 import Streamly.Internal.Data.Fold.Types (Fold(..))
+import Streamly.Internal.Data.Parse.Types (Parse(..), Status(..))
 import Streamly.Internal.Data.Pipe.Types (Pipe(..), PipeState(..))
-import Streamly.Internal.Data.SVar (MonadAsync, defState, adaptState)
+import Streamly.Internal.Data.SVar (MonadAsync, defState, adaptState, State)
 import Streamly.Internal.Data.Unfold.Types (Unfold(..))
 import Streamly.Internal.Data.Strict (Tuple'(..))
 
@@ -673,6 +677,103 @@ foldlS fstep begin (Stream step state) = Stream step' (Left (state, begin))
             Yield x s -> Yield x (Right (Stream stp s))
             Skip s -> Skip (Right (Stream stp s))
             Stop   -> Stop
+
+-- | A Success or Failure Status stops the recursion.
+{-# INLINE_NORMAL parselMx' #-}
+parselMx' :: Monad m => (x -> a -> m (Status a x)) -> m (Status a x) -> (x -> m b) -> Stream m a -> m b
+parselMx' fstep begin done (Stream step state) =
+    begin >>= \x ->
+        -- XXX can we have begin to always be assumed as "Partial"
+        -- and make it type "m x" instead of "m (Status x)"
+        case x of
+            Partial a -> go SPEC a state
+            Success _ a -> done a
+            Failure _ _ -> error "parselMx': parse failure"
+  where
+    -- XXX !acc?
+    go !_ acc st = do
+        -- XXX Can we put that branch here instead?
+        r <- step defState st
+        case r of
+            Yield x s -> do
+                acc' <- fstep acc x
+                -- XXX when we pass acc wrapped with Done/More, then composed any/all
+                -- performance is 6x better. This "done" branch here vs putting the
+                -- done branch in the next iteration of the loop makes the
+                -- difference.
+                case acc' of
+                    Partial a -> go SPEC a s
+                    Success _ a -> done a
+                    Failure _ _ -> error "parselMx': parse failure"
+            Skip s -> go SPEC acc s
+            Stop   -> done acc
+
+-- XXX make sure in the success case the parser returns a nil array
+{-# INLINE_LATE parseOneGroup #-}
+parseOneGroup
+    :: Monad m
+    => Parse m a b
+    -> a
+    -> State K.Stream m a
+    -> (State K.Stream m a -> s -> m (Step s a))
+    -> s
+    -> m (b, Maybe s)
+parseOneGroup (Parse fstep begin done) x gst step state = do
+    acc0 <- begin
+    let acc01 =
+            case acc0 of
+                Partial a -> a
+                -- we will have to return x as well if we return here
+                Success _ _ -> error "parseOneGroup: needs to consume at least one item"
+                Failure _ _ -> error "parseOneGroup: parse failure"
+    acc <- fstep acc01 x
+    case acc of
+        Partial a -> go SPEC state a
+        Success _ a -> done a >>= \r -> return (r, Just state)
+        Failure _ _ -> error "parseOneGroup: parse failure"
+
+    where
+
+    -- XXX is it strict enough?
+    go !_ st !acc = do
+        res <- step gst st
+        case res of
+            Yield y s -> do
+                acc' <- fstep acc y
+                case acc' of
+                    Partial a -> go SPEC s a
+                    Success _ a -> done a >>= \r -> return (r, Just s)
+                    Failure _ _ -> error "parseOneGroup: parse failure"
+            Skip s -> go SPEC s acc
+            Stop -> done acc >>= \r -> return (r, Nothing)
+
+-- XXX we can only use a non-backtracking parser in this.
+{-# INLINE_NORMAL chained #-}
+chained
+    :: Monad m
+    => Parse m a b
+    -> Stream m a
+    -> Stream m b
+chained f (Stream step state) = Stream stepOuter (Just state)
+
+    where
+
+    {-# INLINE_LATE stepOuter #-}
+    stepOuter gst (Just st) = do
+        -- We retrieve the first element of the stream before we start to fold
+        -- a chunk so that we do not return an empty chunk in case the stream
+        -- is empty.
+        res <- step (adaptState gst) st
+        case res of
+            Yield x s -> do
+                -- XXX how to make sure that stepInner and f get fused
+                -- This problem seems to be similar to the concatMap problem
+                (r, s1) <- parseOneGroup f x (adaptState gst) step s
+                return $ Yield r s1
+            Skip s    -> return $ Skip $ Just s
+            Stop      -> return Stop
+
+    stepOuter _ Nothing = return Stop
 
 ------------------------------------------------------------------------------
 -- Specialized Folds

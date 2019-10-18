@@ -25,6 +25,7 @@ import qualified Streamly.Prelude as S
 import qualified Streamly.Internal.Data.Sink as Sink
 
 import qualified Streamly.Internal.Data.Fold as IFL
+import qualified Streamly.Internal.Data.Parse as PR
 import qualified Streamly.Internal.Prelude as IP
 import qualified Streamly.Internal.Data.Pipe as Pipe
 
@@ -274,6 +275,14 @@ main =
           benchIOSink "all,any"    (S.fold ((,) <$> FL.all (<= Ops.maxValue)
                                                   <*> FL.any (> Ops.maxValue)))
         , benchIOSink "sum,length" (S.fold ((,) <$> FL.sum <*> FL.length))
+        ]
+      , bgroup "parser"
+        [
+          benchIOSink "drain" (PR.parse PR.drain)
+        , benchIOSink "any" (PR.parse (PR.any (> Ops.maxValue)))
+        , benchIOSink "all" (PR.parse (PR.all (<= Ops.maxValue)))
+        , benchIOSink "all,any-io"    (PR.parse ((,) <$> PR.all (<= Ops.maxValue)
+                                                  <*> PR.any (> Ops.maxValue)))
         ]
       , bgroup "pipes"
         [ benchIOSink "mapM" (Ops.transformMapM serially 1)

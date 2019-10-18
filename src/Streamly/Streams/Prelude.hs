@@ -48,6 +48,8 @@ module Streamly.Streams.Prelude
     , postscanlx'
     , postscanlMx'
 
+    , parselMx'
+
     -- * Zip style operations
     , eqBy
     , cmpBy
@@ -68,6 +70,7 @@ import Prelude hiding (foldr)
 import qualified Prelude
 
 import Streamly.Internal.Data.Fold.Types (Fold (..))
+import Streamly.Internal.Data.Parse.Types (Status(..))
 
 #ifdef USE_STREAMK_ONLY
 import qualified Streamly.Streams.StreamK as S
@@ -229,6 +232,16 @@ scanlx' :: (IsStream t, Monad m)
     => (x -> a -> x) -> x -> (x -> b) -> t m a -> t m b
 scanlx' step begin done m =
     fromStreamS $ S.scanlx' step begin done $ toStreamS m
+
+{-# INLINE parselMx' #-}
+parselMx'
+    :: (IsStream t, Monad m)
+    => (x -> a -> m (Status a x))
+    -> m (Status a x)
+    -> (x -> m b)
+    -> t m a
+    -> m b
+parselMx' step begin done m = S.parselMx' step begin done $ toStreamS m
 
 ------------------------------------------------------------------------------
 -- Comparison
