@@ -77,7 +77,7 @@ import Prelude
 import Control.Applicative (liftA2)
 import Streamly.Internal.Data.Fold.Types (Fold(..))
 import Streamly.Internal.Data.Strict (Tuple'(..))
-import Streamly.Internal.Data.Parse.Types (Parse(..), Status(..), fromSuccess)
+import Streamly.Internal.Data.Parse.Types (Parse(..), Status(..), fromResult)
 import Streamly.Streams.Serial (SerialT)
 import Streamly.Streams.StreamK (IsStream(..))
 
@@ -150,7 +150,7 @@ ltake n (Parse step initial done) = Parse step' initial' done'
     step' (Tuple' i r) a = do
         res <- step r a
         let i' = i + 1
-            p = Tuple' i' (fromSuccess res)
+            p = Tuple' i' (fromResult res)
         return $
             if i' < n
             then Partial p

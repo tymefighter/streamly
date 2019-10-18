@@ -12,17 +12,14 @@
 
 module Streamly.Internal.Data.Parse.Types
     (
-      Status (..)
-    , fromSuccess
-    , Parse (..)
+      Parse (..)
+    , Status (..)
+    , fromResult
     )
 where
 
 import Control.Applicative (liftA2, Alternative(..))
--- import Streamly.Internal.MonadLazy (MonadLazy(..))
 import Streamly.Internal.Data.Strict (Tuple'(..))
--- import Streamly.Foldr.Types
-import Streamly.Internal.Memory.Array.Types (Array)
 
 {-
 -- Parse result. Failure gives the partial state of the accumulator at failure.
@@ -56,7 +53,14 @@ data Result a =
 -- unconsumed value.
 --
 -- Return a x
+--
+data Status a = Partial !a | Success !a
 
+instance Functor Status where
+    fmap f (Success a) = Success (f a)
+    fmap f (Partial a) = Partial (f a)
+
+{-
 data Status a b =
       Partial !b                      -- partial result
     | Success (Array a) !b            -- Unconsumed input and the result
@@ -66,6 +70,7 @@ instance Functor (Status a) where
     fmap f (Partial b) = Partial (f b)
     fmap f (Success a b) = Success a (f b)
     fmap _ (Failure a e) = Failure a e
+-}
 
 {-
 instance Applicative Result where
@@ -74,8 +79,16 @@ instance Applicative Result where
    Done f <*> More a = More (f a)
    More f <*> Done a = More (f a)
    More f <*> More a = More (f a)
--}
+   -}
 
+-- XXX rename to fromStatus
+fromResult :: Status a -> a
+fromResult res =
+    case res of
+        Success a -> a
+        Partial a -> a
+
+{-
 -- XXX rename to fromStatus
 fromSuccess :: Status a b -> b
 fromSuccess res =
@@ -83,12 +96,13 @@ fromSuccess res =
         Partial b -> b
         Success _ b -> b
         Failure _ _ -> error "fromSuccess: failed parse"
+-}
 
 data Parse m a b =
   -- | @Parse @ @ step @ @ initial @ @ extract@
-  forall x. Parse (x -> a -> m (Status a x)) (m (Status a x)) (x -> m b)
+  forall x. Parse (x -> a -> m (Status x)) (m (Status x)) (x -> m b)
+  -- forall x. Parse (x -> a -> m (Status a x)) (m (Status a x)) (x -> m b)
 
-{-
 instance Monad m => Functor (Parse m a) where
     {-# INLINE fmap #-}
     fmap f (Parse step initial done) = Parse step initial done'
@@ -323,6 +337,4 @@ instance (MonadLazy m, Floating b) => Floating (Foldr m a b) where
 
     {-# INLINE logBase #-}
     logBase = liftA2 logBase
-    -}
-
     -}

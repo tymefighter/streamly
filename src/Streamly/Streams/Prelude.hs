@@ -233,6 +233,7 @@ scanlx' :: (IsStream t, Monad m)
 scanlx' step begin done m =
     fromStreamS $ S.scanlx' step begin done $ toStreamS m
 
+{-
 {-# INLINE parselMx' #-}
 parselMx'
     :: (IsStream t, Monad m)
@@ -241,6 +242,12 @@ parselMx'
     -> (x -> m b)
     -> t m a
     -> m b
+parselMx' step begin done m = S.parselMx' step begin done $ toStreamS m
+-}
+
+{-# INLINE parselMx' #-}
+parselMx' :: (IsStream t, Monad m)
+    => (x -> a -> m (Status x)) -> m (Status x) -> (x -> m b) -> t m a -> m b
 parselMx' step begin done m = S.parselMx' step begin done $ toStreamS m
 
 ------------------------------------------------------------------------------

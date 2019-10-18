@@ -678,6 +678,70 @@ foldlS fstep begin (Stream step state) = Stream step' (Left (state, begin))
             Skip s -> Skip (Right (Stream stp s))
             Stop   -> Stop
 
+-- | A Success result stops the recursion.
+{-# INLINE_NORMAL parselMx' #-}
+parselMx' :: Monad m => (x -> a -> m (Status x)) -> m (Status x) -> (x -> m b) -> Stream m a -> m b
+parselMx' fstep begin done (Stream step state) =
+    begin >>= \x ->
+        -- XXX can we have begin to always be assumed as "Partial"
+        -- and make it type "m x" instead of "m (Status x)"
+        case x of
+            Success a -> done a
+            Partial a -> go SPEC a state
+  where
+    -- XXX !acc?
+    go !_ acc st = do
+        -- XXX Can we put that branch here instead?
+        r <- step defState st
+        case r of
+            Yield x s -> do
+                acc' <- fstep acc x
+                -- XXX when we pass acc wrapped with Done/More, then composed any/all
+                -- performance is 6x better. This "done" branch here vs putting the
+                -- done branch in the next iteration of the loop makes the
+                -- difference.
+                case acc' of
+                    Partial a -> go SPEC a s
+                    Success a -> done a
+            Skip s -> go SPEC acc s
+            Stop   -> done acc
+
+{-# INLINE_LATE parseOneGroup #-}
+parseOneGroup
+    :: Monad m
+    => Parse m a b
+    -> a
+    -> State K.Stream m a
+    -> (State K.Stream m a -> s -> m (Step s a))
+    -> s
+    -> m (b, Maybe s)
+parseOneGroup (Parse fstep begin done) x gst step state = do
+    acc0 <- begin
+    let acc01 =
+            case acc0 of
+                -- we will have to return x as well if we return here
+                Success _ -> error "needs to consume at least one item"
+                Partial a -> a
+    acc <- fstep acc01 x
+    case acc of
+        Partial a -> go SPEC state a
+        Success a -> done a >>= \r -> return (r, Just state)
+
+    where
+
+    -- XXX is it strict enough?
+    go !_ st !acc = do
+        res <- step gst st
+        case res of
+            Yield y s -> do
+                acc' <- fstep acc y
+                case acc' of
+                    Partial a -> go SPEC s a
+                    Success a -> done a >>= \r -> return (r, Just s)
+            Skip s -> go SPEC s acc
+            Stop -> done acc >>= \r -> return (r, Nothing)
+
+{-
 -- | A Success or Failure Status stops the recursion.
 {-# INLINE_NORMAL parselMx' #-}
 parselMx' :: Monad m => (x -> a -> m (Status a x)) -> m (Status a x) -> (x -> m b) -> Stream m a -> m b
@@ -746,6 +810,7 @@ parseOneGroup (Parse fstep begin done) x gst step state = do
                     Failure _ _ -> error "parseOneGroup: parse failure"
             Skip s -> go SPEC s acc
             Stop -> done acc >>= \r -> return (r, Nothing)
+-}
 
 -- XXX we can only use a non-backtracking parser in this.
 {-# INLINE_NORMAL chained #-}
