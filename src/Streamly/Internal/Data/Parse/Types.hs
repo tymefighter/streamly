@@ -1,6 +1,6 @@
-{-# LANGUAGE ExistentialQuantification          #-}
-{-# LANGUAGE BangPatterns          #-}
-{-# LANGUAGE DeriveFunctor          #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE BangPatterns              #-}
+{-# LANGUAGE DeriveFunctor             #-}
 
 -- |
 -- Module      : Streamly.Parse.Types
@@ -155,6 +155,7 @@ instance Monad m => Applicative (ZParse m a) where
                                 -- XXX ideally it should not occur, as the fold
                                 -- driver should not be driving the fold after
                                 -- it has already returned Success previously.
+                                -- XXX Replace this with an informative "error" ?
                                 Success _ -> return (Success x)
                                 Partial r -> do
                                     resR <- stepR r a
@@ -199,6 +200,7 @@ instance Monad m => Applicative (Parse m a) where
 
     {-# INLINE (<*>) #-}
     (Parse stepL initialL doneL) <*> (Parse stepR initialR doneR) =
+        -- XXX Return informative error on consuming when ParseDone?
         let step (ParseDone f x) _ = return $ Success (ParseDone f x)
             step (ParseR f x) a = do
                 resR <- stepR x a
@@ -235,14 +237,37 @@ instance Monad m => Applicative (Parse m a) where
         in Parse step initial done
 
 {-
+
+-- XXX The following causes an error as GHC is unable to infer the
+-- higher rank type. The main problem is the forall quantification.
+-- One solution is to have two types: IParse and Parse
+-- IParse x m a b = IParse (x -> a -> m (Status x)) (m (Status x)) (x -> m b) 
+-- Parse m a b = forall x. Parse (IParse x m a b) deriving (..)
+
 instance Monad m => Monad (Parse m a) where
     return = pure
     Parse step initial done >>= f =
-        let step' = undefined
-            initial' = undefined
-            done' = undefined
-        in  Parse step' initial' done'
-        -}
+        let step' (Left x) a = do
+              res <- step x a
+              case res of
+                Success x -> do
+                  b <- done x
+                  let p@(Parse s i d) = f b
+                  case i of
+                    Success x -> return $ Success $ Right (x, p)
+                    Partial x -> return $ Partial $ Right (x, p)
+                Partial x -> return $ Partial $ Left x
+            step' (Right (x, p@(Parse s i d))) a = do
+              res <- s x a
+              case res of
+                Success x -> return $ Success $ Right (x, p)
+                Partial x -> return $ Partial $ Right (x, p)
+            initial' = fmap Left <$> initial
+            done' (Left _) = error "The parsing is not done yet"
+            done' (Right (x, Parse _ _ d)) = d x
+        in Parse step' initial' done'
+
+-}
 
 -- There are two Alternative instances possible:
 -- 1) Get first succeeding fold
