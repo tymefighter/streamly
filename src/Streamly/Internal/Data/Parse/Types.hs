@@ -21,45 +21,59 @@ where
 import Control.Applicative (liftA2, Alternative(..))
 import Streamly.Internal.Data.Strict (Tuple'(..))
 
-{-
--- Parse result. Failure gives the partial state of the accumulator at failure.
--- Or should we just use "Failure"? Or should we encode the reason of failure
--- i.e. a failure string or some other type?
-data Result a =
-      Partial !a
-    | Success !a
-    | Failure !a
--}
+-- We should incorporate this in the Fold type itself instead of having a
+-- separate Parse type. We can use newtypes for different Applicative behaviors
+-- of the type.
+--
+-- Generalizing the Fold type to incorporate Success and Failure. If the fold
+-- returns a success, it means the fold result has saturated and it will not
+-- changes on any further input.
 
--- When the fold is done we return a value with the completion flag (Success).
--- We can instead return a Partial and return a "Stop" without a value on the
--- next iteration, however that means the driver would lose one extra value in
--- driving the fold one more extra time. The driver can always buffer the
--- previous input so that it does not lose it. That way we can also implement
--- combinators like "takeWhile" which only decide to Stop after looking at the
--- next input. However, it may be more efficient for the fold to return the
--- value instead of the driver storing it, because this is not a common case.
---
--- XXX we need to have a contructor for returning an unconsumed value as well.
--- Otherwise we cannot implement takeWhile correctly. An alternative may be for
--- the driver to remember the last value and we just return a status whether we
--- consumed it or not.
---
--- takeWhile is actually a special case of backtracking. For example in case of
--- "string" parser which matches a string we may have to return a lot more
--- unconsumed input if the matching fails at the end of the string. However,
--- for failing parsers we can use the Alternative instance to do the
--- backtracking. For takeWhile case the parser succeeds but it still returns an
--- unconsumed value.
---
--- Return a x
---
 data Status a = Partial !a | Success !a
 
 instance Functor Status where
     fmap f (Success a) = Success (f a)
     fmap f (Partial a) = Partial (f a)
 
+-- With the Success constructor the fold type gets generalized to "terminating
+-- folds". There may be two types of terminating folds, (1) the folds succeeds
+-- with the input that is given to it till now fully consumed and we can feed
+-- the rest of the input to the next fold. The "take" fold comes in this
+-- category, it will consume first n elements in the input and then the rest
+-- can used elsewhere. "takeWhile" is another such fold, however in takewhile
+-- the last step may not consume the input element, when the condition fails,
+-- in that case that input element needs to be used in the remaining processing.
+--
+-- We can further generalize the folds to also allow for a failure case. If a
+-- fold fails then the input that it consumed till now can be reused.  If the
+-- fold fails we can use an Alternative composition to try another fold on the
+-- same input.  This is called backtracking.
+--
+-- There are two possible ways to buffer the original input. Either the driver
+-- can buffer the input until the fold results in a success or failure or the
+-- fold accumulator itself can store the input and in case it fails the input
+-- can be extracted and used by the driver to drive another fold.
+--
+-- If the driver buffers the input, we need a co-ordination between the fold
+-- and the driver. Always succeeding folds (e.g. takeWhile) will have to
+-- indicate to the driver, the point up to which that they have consumed the
+-- input so that when the fold completes the driver can reuse the input from
+-- that point onwards.
+--
+-- On the other hand, if the fold buffers the input then it can just return the
+-- final result and the leftover input. The result could be a Success with the
+-- leftover input or a Failure with leftover input. In case of failure, all
+-- input would be the leftover input.
+--
+--
+-- Storing the remaining input in the Fold seems simpler, so we will try that.
+-- To remain fully polymorphic without a constraint, our options to store the
+-- values are (1) Stream, (2) Vector. For now for simplicity we will use a
+-- "SerialT Identity a" and we can later change it to a Vector. We could also
+-- use an Array type but that would require a Storable constraint. Though I
+-- guess most or all types that we can use in parsers would actually be
+-- Storable.
+--
 {-
 data Status a b =
       Partial !b                      -- partial result
@@ -114,15 +128,17 @@ instance Monad m => Functor (Parse m a) where
 
 -- For folds/parses the following types of applicatives are possible:
 --
--- 1) Parallel applicative feeding the input to all folds (fold type) (Zip)
--- 2) Serial chained applicative feeding remaining input to the next fold
--- (parse type) (DFS)
--- 3) Distribute one input element to each fold in a round-robin fashion (BFS)
---
--- Fold
--- WFold
--- ZFold
+-- 1) distributing the same input to all folds and then combine the results.
+-- 2) Dual to stream append, each fold consumes some input and the next fold
+-- takes over the rest of the input and then the applicative combines all the
+-- results.
+-- 3) Dual to stream interleave, divide the input among all folds in a
+-- round-robin fashion.
 
+-- | The Applicative instance of this type distributes the input to all the
+-- Folds. This is a replacement of the default Applicative instance in
+-- Data.Fold.Types.
+--
 newtype ZParse m a b = ZParse { unZParse :: Parse m a b } deriving Functor
 
 instance Monad m => Applicative (ZParse m a) where
@@ -136,7 +152,9 @@ instance Monad m => Applicative (ZParse m a) where
                     case xL of
                         Success _ ->
                             case xR of
-                                -- XXX should not occur
+                                -- XXX ideally it should not occur, as the fold
+                                -- driver should not be driving the fold after
+                                -- it has already returned Success previously.
                                 Success _ -> return (Success x)
                                 Partial r -> do
                                     resR <- stepR r a
@@ -169,6 +187,9 @@ instance Monad m => Applicative (ZParse m a) where
 
         in  ZParse (Parse step initial done)
 
+-- | The Applicative instance feeds the input to the first fold, when the first
+-- fold completes the rest of the input is sent to the next fold an so on.
+--
 data ChainState x1 f x = ParseL x1 | ParseR f x | ParseDone f x
 
 instance Monad m => Applicative (Parse m a) where
