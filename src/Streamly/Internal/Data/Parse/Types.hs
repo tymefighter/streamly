@@ -239,9 +239,7 @@ instance Monad m => Applicative (Parse m a) where
 {-
 -- XXX The following causes an error as GHC is unable to infer the
 -- higher rank type. The main problem is the forall quantification.
--- One solution is to have two types: IParse and Parse
--- IParse x m a b = IParse (x -> a -> m (Status x)) (m (Status x)) (x -> m b) 
--- Parse m a b = forall x. Parse (IParse x m a b) deriving (..)
+-- How to circumvent this problem?
 
 instance Monad m => Monad (Parse m a) where
     return = pure
