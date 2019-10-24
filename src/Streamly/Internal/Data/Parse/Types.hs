@@ -237,7 +237,6 @@ instance Monad m => Applicative (Parse m a) where
         in Parse step initial done
 
 {-
-
 -- XXX The following causes an error as GHC is unable to infer the
 -- higher rank type. The main problem is the forall quantification.
 -- One solution is to have two types: IParse and Parse
@@ -246,28 +245,28 @@ instance Monad m => Applicative (Parse m a) where
 
 instance Monad m => Monad (Parse m a) where
     return = pure
-    Parse step initial done >>= f =
-        let step' (Left x) a = do
-              res <- step x a
-              case res of
-                Success x -> do
-                  b <- done x
-                  let p@(Parse s i d) = f b
-                  case i of
+    Parse step initial done >>= f = Parse step' (fmap Left <$> initial) done'
+        where
+            step' (Left x) a = do
+                r <- step x a
+                case r of
+                    Success x -> do
+                        p@(Parse s mi d) <- f <$> done x
+                        i <- mi
+                        case i of
+                            Success x -> return $ Success $ Right (x, p)
+                            Partial x -> return $ Partial $ Right (x, p)
+                    Partial x -> return $ Partial $ Left x
+            step' (Right (x, p@(Parse s i d))) a = do
+                r <- s x a
+                case r of
                     Success x -> return $ Success $ Right (x, p)
                     Partial x -> return $ Partial $ Right (x, p)
-                Partial x -> return $ Partial $ Left x
-            step' (Right (x, p@(Parse s i d))) a = do
-              res <- s x a
-              case res of
-                Success x -> return $ Success $ Right (x, p)
-                Partial x -> return $ Partial $ Right (x, p)
-            initial' = fmap Left <$> initial
             done' (Left _) = error "The parsing is not done yet"
             done' (Right (x, Parse _ _ d)) = d x
-        in Parse step' initial' done'
 
 -}
+
 
 -- There are two Alternative instances possible:
 -- 1) Get first succeeding fold
