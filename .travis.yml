@@ -189,7 +189,8 @@ matrix:
     addons: {apt: {packages: [cabal-install-head,ghc-8.8.1], sources: [hvr-ghc]}}
     before_install: chmod +x ./scripts/haddock.sh
     before_deploy:
-      - bash -c "$PACKCHECK_LOCAL_PATH $BUILD CABAL_BUILD_OPTIONS=\" --haddock-html-location='https://hackage.haskell.org/package/$pkg-$version/docs' --haddock-quickjump --haddock-hyperlink-source --with-haddock=$TRAVIS_BUILD_DIR/scripts/haddock.sh\" DISABLE_TEST=n DISABLE_BENCH=y DISABLE_DOCS=y DISABLE_SDIST_BUILD=y DISABLE_DIST_CHECKS=y PATH=/bin:/usr/bin"
+      - unset DISABLE_TEST
+      - bash -c "$PACKCHECK_LOCAL_PATH $BUILD CABAL_BUILD_OPTIONS=\" --haddock-html-location='https://hackage.haskell.org/package/$pkg-$version/docs' --haddock-quickjump --haddock-hyperlink-source --with-haddock=$TRAVIS_BUILD_DIR/scripts/haddock.sh\" DISABLE_BENCH=y DISABLE_DOCS=y DISABLE_SDIST_BUILD=y DISABLE_DIST_CHECKS=y PATH=/bin:/usr/bin"
     deploy:
       provider: pages
       skip_cleanup: true
