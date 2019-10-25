@@ -192,6 +192,7 @@ matrix:
       provider: pages
       skip_cleanup: true
       repo: cwellBot/cwellBot.github.io
+      target_branch: master
       github_token: $DANGER_GITHUB_API_TOKEN
       local_dir: ./html/
       name: cwellBot
