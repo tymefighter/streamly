@@ -58,8 +58,8 @@ env:
   - PACKCHECK_LOCAL_PATH="./packcheck.sh"
   # If you have not committed packcheck.sh in your repo at PACKCHECK_LOCAL_PATH
   # then it is automatically pulled from this URL.
-  - PACKCHECK_GITHUB_URL="https://raw.githubusercontent.com/harendra-kumar/packcheck"
-  - PACKCHECK_GITHUB_COMMIT="d11a8a68fef00f4932bbedd6134950495ccd7420"
+  - PACKCHECK_GITHUB_URL="https://raw.githubusercontent.com/pranaysashank/packcheck"
+  - PACKCHECK_GITHUB_COMMIT="8734dd60a03b255af3997972cc78e77f6f517ede"
 
 notifications:
   email:
@@ -185,12 +185,9 @@ matrix:
   # --------------------------------------------------------------------------
 
   - stage: "deploy docs"
-    env: BUILD=cabal-v2 GHCVER=8.8.1 GHC_OPTIONS="" CABAL_BUILD_OPTIONS="--enable-documentation" DISABLE_TEST=y DISABLE_BENCH=y DISABLE_DOCS=y DISABLE_SDIST_BUILD=y DISABLE_DIST_CHECKS=y
+    env: BUILD=cabal-v2 GHCVER=8.8.1 GHC_OPTIONS="" CABAL_DEP_OPTIONS="--enable-documentation" DISABLE_TEST=y DISABLE_BENCH=y DISABLE_SDIST_BUILD=y DISABLE_DIST_CHECKS=y HADDOCK_BUILD_OPTIONS="--haddock-html-location='https://hackage.haskell.org/package/$pkg-$version/docs' --haddock-quickjump --haddock-hyperlink-source --with-haddock=$TRAVIS_BUILD_DIR/scripts/haddock.sh"
     addons: {apt: {packages: [cabal-install-head,ghc-8.8.1], sources: [hvr-ghc]}}
     before_install: chmod +x ./scripts/haddock.sh
-    before_deploy:
-      - unset DISABLE_DOCS
-      - bash -c "$PACKCHECK_LOCAL_PATH $BUILD CABAL_BUILD_OPTIONS=\" --haddock-html-location='https://hackage.haskell.org/package/$pkg-$version/docs' --haddock-quickjump --haddock-hyperlink-source --with-haddock=$TRAVIS_BUILD_DIR/scripts/haddock.sh\" DISABLE_TEST=y DISABLE_BENCH=y DISABLE_SDIST_BUILD=y DISABLE_DIST_CHECKS=y PATH=/bin:/usr/bin"
     deploy:
       provider: pages
       skip_cleanup: true
