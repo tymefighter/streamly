@@ -77,7 +77,7 @@ import Prelude
 import Control.Applicative (liftA2)
 import Streamly.Internal.Data.Fold.Types (Fold(..))
 import Streamly.Internal.Data.Strict (Tuple'(..))
-import Streamly.Internal.Data.Parse.Types (Parse(..), Status(..), fromResult)
+import Streamly.Internal.Data.Parse.Types (Parse(..), Status(..), fromStatus)
 import Streamly.Streams.Serial (SerialT)
 import Streamly.Streams.StreamK (IsStream(..))
 
@@ -110,10 +110,10 @@ any predicate = Parse step initial done
     initial = return $ Partial False
     step x a = return $
         if x
-        then Success x
+        then Success [] x
         else
             if predicate a
-            then Success True
+            then Success [] True
             else Partial False
     done = return
 
@@ -127,8 +127,8 @@ all predicate = Parse step initial done
         then
             if predicate a
             then Partial True
-            else Success False
-        else Success x
+            else Success [] False
+        else Success [] x
     done = return
 
 -------------------------------------------------------------------------------
@@ -150,11 +150,11 @@ ltake n (Parse step initial done) = Parse step' initial' done'
     step' (Tuple' i r) a = do
         res <- step r a
         let i' = i + 1
-            p = Tuple' i' (fromResult res)
+            p = Tuple' i' (fromStatus res)
         return $
             if i' < n
             then Partial p
-            else Success p
+            else Success [] p
 
 -- XXX consider using (Status x) as the argument to the step function so that
 -- we can remember and make decisions based on the previous Status of the
@@ -183,7 +183,7 @@ ltakeWhileSep predicate (Parse step initial done) = Parse step' initial done
         -- use a Constructor around "r".
         --
         -- XXX we need to return the unsed value a here.
-        else return $ Success r
+        else return $ Success [a] r
 
 -- XXX we can take a Fold as an argument and turn that into a parse?
 -- This can be an upgrade of a Fold into a parse using a combinator

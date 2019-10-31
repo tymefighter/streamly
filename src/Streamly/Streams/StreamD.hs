@@ -680,14 +680,15 @@ foldlS fstep begin (Stream step state) = Stream step' (Left (state, begin))
 
 -- | A Success result stops the recursion.
 {-# INLINE_NORMAL parselMx' #-}
-parselMx' :: Monad m => (x -> a -> m (Status x)) -> m (Status x) -> (x -> m b) -> Stream m a -> m b
+parselMx' :: Monad m => (x -> a -> m (Status a x)) -> m (Status a x) -> (x -> m b) -> Stream m a -> m b
 parselMx' fstep begin done (Stream step state) =
     begin >>= \x ->
         -- XXX can we have begin to always be assumed as "Partial"
         -- and make it type "m x" instead of "m (Status x)"
         case x of
-            Success a -> done a
+            Success _ a -> done a
             Partial a -> go SPEC a state
+            Failure _ e -> error e
   where
     -- XXX !acc?
     go !_ acc st = do
@@ -702,7 +703,8 @@ parselMx' fstep begin done (Stream step state) =
                 -- difference.
                 case acc' of
                     Partial a -> go SPEC a s
-                    Success a -> done a
+                    Success _ a -> done a
+                    Failure _ e -> error e
             Skip s -> go SPEC acc s
             Stop   -> done acc
 
@@ -720,12 +722,13 @@ parseOneGroup (Parse fstep begin done) x gst step state = do
     let acc01 =
             case acc0 of
                 -- we will have to return x as well if we return here
-                Success _ -> error "needs to consume at least one item"
+                Success _ _ -> error "needs to consume at least one item"
                 Partial a -> a
+                Failure _ e -> error e
     acc <- fstep acc01 x
     case acc of
         Partial a -> go SPEC state a
-        Success a -> done a >>= \r -> return (r, Just state)
+        Success _ a -> done a >>= \r -> return (r, Just state)
 
     where
 
@@ -737,7 +740,8 @@ parseOneGroup (Parse fstep begin done) x gst step state = do
                 acc' <- fstep acc y
                 case acc' of
                     Partial a -> go SPEC s a
-                    Success a -> done a >>= \r -> return (r, Just s)
+                    Success _ a -> done a >>= \r -> return (r, Just s)
+                    Failure _ e -> error e
             Skip s -> go SPEC s acc
             Stop -> done acc >>= \r -> return (r, Nothing)
 

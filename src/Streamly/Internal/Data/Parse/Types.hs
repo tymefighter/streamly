@@ -14,7 +14,7 @@ module Streamly.Internal.Data.Parse.Types
     (
       Parse (..)
     , Status (..)
-    , fromResult
+    , fromStatus
     )
 where
 
@@ -28,13 +28,13 @@ import Streamly.Internal.Data.Strict (Tuple'(..))
 -- Generalizing the Fold type to incorporate Success and Failure. If the fold
 -- returns a success, it means the fold result has saturated and it will not
 -- changes on any further input.
-
+{-
 data Status a = Partial !a | Success !a
 
 instance Functor Status where
     fmap f (Success a) = Success (f a)
     fmap f (Partial a) = Partial (f a)
-
+-}
 -- With the Success constructor the fold type gets generalized to "terminating
 -- folds". There may be two types of terminating folds, (1) the folds succeeds
 -- with the input that is given to it till now fully consumed and we can feed
@@ -74,17 +74,16 @@ instance Functor Status where
 -- guess most or all types that we can use in parsers would actually be
 -- Storable.
 --
-{-
+
 data Status a b =
-      Partial !b                      -- partial result
-    | Success (Array a) !b            -- Unconsumed input and the result
-    | Failure (Array a) (Array Char)  -- Unconsumed input and the error
+      Partial !b                -- Partial result
+    | Success [a] !b            -- Unconsumed input and the result
+    | Failure [a] String        -- Unconsumed input and the error
 
 instance Functor (Status a) where
     fmap f (Partial b) = Partial (f b)
     fmap f (Success a b) = Success a (f b)
     fmap _ (Failure a e) = Failure a e
--}
 
 {-
 instance Applicative Result where
@@ -96,26 +95,25 @@ instance Applicative Result where
    -}
 
 -- XXX rename to fromStatus
+{-
 fromResult :: Status a -> a
 fromResult res =
     case res of
         Success a -> a
         Partial a -> a
+-}
 
-{-
--- XXX rename to fromStatus
-fromSuccess :: Status a b -> b
-fromSuccess res =
+fromStatus :: Status a b -> b
+fromStatus res =
     case res of
         Partial b -> b
         Success _ b -> b
-        Failure _ _ -> error "fromSuccess: failed parse"
--}
+        Failure _ _ -> error "fromStatus: failed parse"
 
 data Parse m a b =
   -- | @Parse @ @ step @ @ initial @ @ extract@
-  forall x. Parse (x -> a -> m (Status x)) (m (Status x)) (x -> m b)
-  -- forall x. Parse (x -> a -> m (Status a x)) (m (Status a x)) (x -> m b)
+  -- forall x. Parse (x -> a -> m (Status x)) (m (Status x)) (x -> m b)
+  forall x. Parse (x -> a -> m (Status a x)) (m (Status a x)) (x -> m b)
 
 instance Monad m => Functor (Parse m a) where
     {-# INLINE fmap #-}
@@ -124,7 +122,9 @@ instance Monad m => Functor (Parse m a) where
         done' x = fmap f $! done x
 
     {-# INLINE (<$) #-}
-    (<$) b = \_ -> pure b
+    (<$) b _ = Parse (\_ _ -> return $ Success [] ())
+                     (return $ Success [] ()) 
+                     (\_ -> return b)
 
 -- For folds/parses the following types of applicatives are possible:
 --
@@ -142,100 +142,115 @@ instance Monad m => Functor (Parse m a) where
 newtype ZParse m a b = ZParse { unZParse :: Parse m a b } deriving Functor
 
 instance Monad m => Applicative (ZParse m a) where
-    {-# INLINE pure #-}
-    pure b = ZParse $ pure b
+  {-# INLINE pure #-}
+  -- pure b = ZParse $ pure b
+  pure b = undefined
 
-    {-# INLINE (<*>) #-}
-    ZParse (Parse stepL initialL doneL) <*> ZParse (Parse stepR initialR doneR) =
-        let step x@(Tuple' xL xR) a =
-                    -- XXX we can keep xL and xR without the Result wrapper
-                    case xL of
-                        Success _ ->
-                            case xR of
-                                -- XXX ideally it should not occur, as the fold
-                                -- driver should not be driving the fold after
-                                -- it has already returned Success previously.
-                                -- XXX Replace this with an informative "error" ?
-                                Success _ -> return (Success x)
-                                Partial r -> do
-                                    resR <- stepR r a
-                                    return $ case resR of
-                                        Success _ -> Success $ Tuple' xL resR
-                                        Partial _ -> Partial $ Tuple' xL resR
-                        Partial l ->
-                            case xR of
-                                Success _ -> do
-                                    resL <- stepL l a
-                                    return $ case resL of
-                                        Success _ -> Success $ Tuple' resL xR
-                                        Partial _ -> Partial $ Tuple' resL xR
-                                Partial r -> do
-                                    resL <- stepL l a
-                                    resR <- stepR r a
-                                    return $ case (resL, resR) of
-                                        (Success _, Success _) -> Success $ Tuple' resL resR
-                                        (_, _)           -> Partial $ Tuple' resL resR
+  {-# INLINE (<*>) #-}
+  ZParse (Parse stepL initialL doneL) <*> ZParse (Parse stepR initialR doneR) =
+    ZParse (Parse step initial done)
+    where
+      step (Tuple' xL xR) a = do
+        resL <- stepL xL a
+        resR <- stepR xR a
+        return $ checkRes (resL, resR)
 
-            initial = do
-                resL <- initialL
-                resR <- initialR
-                return $ case (resL, resR) of
-                    (Success _, Success _) -> Success $ Tuple' resL resR
-                    (_, _)           -> Partial $ Tuple' resL resR
+      initial = do
+        resL <- initialL
+        resR <- initialR
+        return $ checkRes (resL, resR)
+      
+      checkRes (resL, resR) = case (resL, resR) of
+          (Success bL xL, Success bR xR)
+            | length bL > length bR  -> Success bR (Tuple' xL xR)
+            | otherwise              -> Success bL (Tuple' xL xR)
+          (Success _ xL, Partial xR) -> Partial $ Tuple' xL xR
+          (Partial xL, Success _ xR) -> Partial $ Tuple' xL xR
+          (Partial xL, Partial xR)   -> Partial $ Tuple' xL xR
+          (Failure b e, _)           -> Failure b e
+          (_, Failure b e)           -> Failure b e
 
-            done (Tuple' xL xR) =
-                doneL (fromResult xL) <*> doneR (fromResult xR)
+      done (Tuple' xL xR) =
+        doneL xL <*> doneR xR
 
-        in  ZParse (Parse step initial done)
+
 
 -- | The Applicative instance feeds the input to the first fold, when the first
 -- fold completes the rest of the input is sent to the next fold an so on.
 --
-data ChainState x1 f x = ParseL x1 | ParseR f x | ParseDone f x
+data ChainState a x1 f x
+  -- ParserL state and all the input it consumedx
+  = ParseL x1 [a]
+  -- ParserL's consumed input, ParserL unconsumed input, ParserL output and 
+  -- ParserR state 
+  | ParseR [a] [a] f x
+  -- ParserR unconsumed input, ParserL output, ParserR success state
+  | ParseDone [a] f x
 
 instance Monad m => Applicative (Parse m a) where
-    {-# INLINE pure #-}
-    -- XXX run the action instead of ignoring it??
-    pure b = Parse (\_ _ -> pure $ Success ()) (pure $ Success ()) (\_ -> pure b)
+  {-# INLINE pure #-}
+  -- XXX run the action instead of ignoring it??
+  pure b = Parse (\_ _ -> pure $ Success [] ())
+                 (pure $ Success [] ())
+                 (\_ -> pure b)
 
-    {-# INLINE (<*>) #-}
-    (Parse stepL initialL doneL) <*> (Parse stepR initialR doneR) =
-        -- XXX Return informative error on consuming when ParseDone?
-        let step (ParseDone f x) _ = return $ Success (ParseDone f x)
-            step (ParseR f x) a = do
-                resR <- stepR x a
-                case resR of
-                    Success r -> return $ Success $ ParseDone f r
-                    Partial r -> return $ Partial $ ParseR f r
+  {-# INLINE (<*>) #-}
+  (Parse stepL initialL doneL) <*> (Parse stepR initialR doneR) = 
+    Parse step initial done
+      where
+        step (ParseL l bi) a = do
+          resL <- stepL l a
+          case resL of
+            Partial x -> return $ Partial $ ParseL x (a:bi)
+            Failure b e -> return $ Failure b e
+            Success bL x -> do
+              f <- doneL x
+              resR <- initialR
+              case resR of
+                Success bR r -> let ai = bL ++ bR in
+                                    return $ Success ai $ ParseDone ai f r
+                Partial r    -> return $ Partial $ ParseR (reverse bi) bL f r
+                Failure b e -> return $ Failure (reverse bi) e
 
-            step b@(ParseL f) a = do
-                    resL <- stepL f a
-                    case resL of
-                        Success x -> do
-                            f <- doneL x
-                            resR <- initialR
-                            case resR of
-                                Success r -> return $ Success $ ParseDone f r
-                                Partial r -> return $ Partial $ ParseR f r
-                        Partial x -> return $ Partial $ ParseL x
+        step (ParseDone b f x) a = return $ Success ai (ParseDone ai f x)
+          where ai = b ++ [a]
 
-            initial = do
-                resL <- initialL
-                case resL of
-                    Success x -> do
-                        f <- doneL x
-                        resR <- initialR
-                        case resR of
-                            Success r -> return $ Success $ ParseDone f r
-                            Partial r -> return $ Partial $ ParseR f r
-                    Partial x -> return $ Partial (ParseL x)
+        step (ParseR li [] f x) a = do
+          resR <- stepR x a
+          case resR of
+            Success b r -> return $ Success b $ ParseDone b f r
+            Partial r   -> return $ Partial $ ParseR li [] f r
+            Failure b e -> return $ Failure (li ++ b) e
 
-            done (ParseDone f x) = do
-                r <- doneR x
-                return $ f r
-            done _ = error "incomplete or failed parse"
-        in Parse step initial done
+        step (ParseR li (m:ms) f x) a = do
+          resR <- stepR x m
+          case resR of
+            Success b r -> return $ Success (b ++ ai) $ ParseDone (b ++ ai) f r
+            Partial r ->   return $ Partial $ ParseR li ai f r
+            Failure b e -> return $ Failure (li ++ b) e
+          where ai = ms ++ [a]
 
+
+        initial = do
+          resL <- initialL
+          case resL of
+            Partial x -> return $ Partial $ ParseL x []
+            Failure b e -> return $ Failure b e
+            Success bL x -> do
+              f <- doneL x
+              resR <- initialR
+              case resR of
+                Success bR r -> let ai = bL ++ bR in
+                                    return $ Success ai $ ParseDone ai f r
+                Partial r    -> return $ Partial $ ParseR [] bL f r
+                Failure b' e' -> return $ Failure b' e'
+
+        done (ParseDone _ f x) = do
+          r <- doneR x
+          return $ f r
+        done _ = error "incomplete or failed parse"
+
+{-
 {-
 -- XXX The following causes an error as GHC is unable to infer the
 -- higher rank type. The main problem is the forall quantification.
@@ -380,4 +395,5 @@ instance (MonadLazy m, Floating b) => Floating (Foldr m a b) where
 
     {-# INLINE logBase #-}
     logBase = liftA2 logBase
+    -}
     -}

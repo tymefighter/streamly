@@ -247,7 +247,7 @@ parselMx' step begin done m = S.parselMx' step begin done $ toStreamS m
 
 {-# INLINE parselMx' #-}
 parselMx' :: (IsStream t, Monad m)
-    => (x -> a -> m (Status x)) -> m (Status x) -> (x -> m b) -> t m a -> m b
+    => (x -> a -> m (Status a x)) -> m (Status a x) -> (x -> m b) -> t m a -> m b
 parselMx' step begin done m = S.parselMx' step begin done $ toStreamS m
 
 ------------------------------------------------------------------------------
