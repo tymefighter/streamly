@@ -113,6 +113,11 @@ fromStatus res =
 data Parse m a b =
   -- | @Parse @ @ step @ @ initial @ @ extract@
   -- forall x. Parse (x -> a -> m (Status x)) (m (Status x)) (x -> m b)
+  --
+  -- XXX Perhaps change `m` to `BufferT m` where `type BufferT = StateT`?
+  -- Since every Parser will have to perform buffer handeling, it is
+  -- better to make it implicit.
+  --
   forall x. Parse (x -> a -> m (Status a x)) (m (Status a x)) (x -> m b)
 
 instance Monad m => Functor (Parse m a) where
@@ -143,8 +148,7 @@ newtype ZParse m a b = ZParse { unZParse :: Parse m a b } deriving Functor
 
 instance Monad m => Applicative (ZParse m a) where
   {-# INLINE pure #-}
-  -- pure b = ZParse $ pure b
-  pure b = undefined
+  pure b = ZParse $ pure b
 
   {-# INLINE (<*>) #-}
   ZParse (Parse stepL initialL doneL) <*> ZParse (Parse stepR initialR doneR) =
@@ -178,6 +182,7 @@ instance Monad m => Applicative (ZParse m a) where
 -- | The Applicative instance feeds the input to the first fold, when the first
 -- fold completes the rest of the input is sent to the next fold an so on.
 --
+-- XXX Consider using a queue?
 data ChainState a x1 f x
   -- ParserL state and all the input it consumedx
   = ParseL x1 [a]
@@ -201,16 +206,17 @@ instance Monad m => Applicative (Parse m a) where
         step (ParseL l bi) a = do
           resL <- stepL l a
           case resL of
+            -- XXX Use a queue instead of lists?
             Partial x -> return $ Partial $ ParseL x (a:bi)
             Failure b e -> return $ Failure b e
             Success bL x -> do
               f <- doneL x
               resR <- initialR
               case resR of
-                Success bR r -> let ai = bL ++ bR in
-                                    return $ Success ai $ ParseDone ai f r
+                Success bR r  -> let ai = bL ++ bR
+                                  in return $ Success ai $ ParseDone ai f r
                 Partial r    -> return $ Partial $ ParseR (reverse bi) bL f r
-                Failure b e -> return $ Failure (reverse bi) e
+                Failure b e  -> return $ Failure b e
 
         step (ParseDone b f x) a = return $ Success ai (ParseDone ai f x)
           where ai = b ++ [a]
@@ -225,11 +231,12 @@ instance Monad m => Applicative (Parse m a) where
         step (ParseR li (m:ms) f x) a = do
           resR <- stepR x m
           case resR of
-            Success b r -> return $ Success (b ++ ai) $ ParseDone (b ++ ai) f r
-            Partial r ->   return $ Partial $ ParseR li ai f r
+            Success b r ->
+              let sb = b ++ pb
+               in return $ Success sb $ ParseDone sb f r
+            Partial r ->   return $ Partial $ ParseR li pb f r
             Failure b e -> return $ Failure (li ++ b) e
-          where ai = ms ++ [a]
-
+          where pb = ms ++ [a]
 
         initial = do
           resL <- initialL
@@ -240,9 +247,9 @@ instance Monad m => Applicative (Parse m a) where
               f <- doneL x
               resR <- initialR
               case resR of
-                Success bR r -> let ai = bL ++ bR in
-                                    return $ Success ai $ ParseDone ai f r
-                Partial r    -> return $ Partial $ ParseR [] bL f r
+                Success bR r  -> let ai = bL ++ bR
+                                  in return $ Success ai $ ParseDone ai f r
+                Partial r     -> return $ Partial $ ParseR [] bL f r
                 Failure b' e' -> return $ Failure b' e'
 
         done (ParseDone _ f x) = do
@@ -250,7 +257,6 @@ instance Monad m => Applicative (Parse m a) where
           return $ f r
         done _ = error "incomplete or failed parse"
 
-{-
 {-
 -- XXX The following causes an error as GHC is unable to infer the
 -- higher rank type. The main problem is the forall quantification.
@@ -280,11 +286,37 @@ instance Monad m => Monad (Parse m a) where
 
 -}
 
-
+{-
 -- There are two Alternative instances possible:
 -- 1) Get first succeeding fold
 -- 2) Get all succeeding folds (to get all possible parses)
+
+-- XXX We should perhaps have just "Alt" implementation instead of
+-- "Alternative".  Because we do not have a sensible identity for Alternative.
+--
+-- If the first fold fails we run the second fold.
+-- XXX This gets the first successful fold.
+instance Monad m => Alternative (Parse m a) where
+    {-# INLINE empty #-}
+    empty = Parse (\_ _ -> return $ Failure [] "default failure")
+                  (return $ Failure [] "default failure")
+                  (\_ -> error "default failure")
+
+    {-# INLINE (<|>) #-}
+    Parse sL iL dL <|> Parse sR iR dR = Parse step initial done 
+      where 
+        -- XXX See the comment about the use of `BufferT`.
+        step (Left s) a = do
+          resL <- sL s a
+          case resL of
+            Success b s' -> 
+-}
+
 {-
+-- There are two Alternative instances possible:
+-- 1) Get first succeeding fold
+-- 2) Get all succeeding folds (to get all possible parses)
+
 -- XXX We should perhaps have just "Alt" implementation instead of
 -- "Alternative".  Because we do not have a sensible identity for Alternative.
 --
@@ -297,6 +329,9 @@ instance MonadLazy m => Alternative (Foldr m a) where
 
     {-# INLINE (<|>) #-}
     Foldr stepL finalL projectL <|> Foldr stepR finalR projectR = undefined
+-}
+
+{-
 
 instance (Semigroup b, MonadLazy m) => Semigroup (Foldr m a b) where
     {-# INLINE (<>) #-}
@@ -395,5 +430,4 @@ instance (MonadLazy m, Floating b) => Floating (Foldr m a b) where
 
     {-# INLINE logBase #-}
     logBase = liftA2 logBase
-    -}
     -}

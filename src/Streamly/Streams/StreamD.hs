@@ -729,6 +729,7 @@ parseOneGroup (Parse fstep begin done) x gst step state = do
     case acc of
         Partial a -> go SPEC state a
         Success _ a -> done a >>= \r -> return (r, Just state)
+        Failure _ e -> error e
 
     where
 
