@@ -286,7 +286,6 @@ instance Monad m => Monad (Parse m a) where
 
 -}
 
-{-
 -- There are two Alternative instances possible:
 -- 1) Get first succeeding fold
 -- 2) Get all succeeding folds (to get all possible parses)
@@ -294,8 +293,8 @@ instance Monad m => Monad (Parse m a) where
 -- XXX We should perhaps have just "Alt" implementation instead of
 -- "Alternative".  Because we do not have a sensible identity for Alternative.
 --
--- If the first fold fails we run the second fold.
 -- XXX This gets the first successful fold.
+-- XXX Can be simplified?
 instance Monad m => Alternative (Parse m a) where
     {-# INLINE empty #-}
     empty = Parse (\_ _ -> return $ Failure [] "default failure")
@@ -303,14 +302,58 @@ instance Monad m => Alternative (Parse m a) where
                   (\_ -> error "default failure")
 
     {-# INLINE (<|>) #-}
-    Parse sL iL dL <|> Parse sR iR dR = Parse step initial done 
+    Parse stepL initialL doneL <|> Parse stepR initialR doneR =
+      Parse step initial done 
       where 
         -- XXX See the comment about the use of `BufferT`.
-        step (Left s) a = do
-          resL <- sL s a
-          case resL of
-            Success b s' -> 
--}
+        step (Nothing, Nothing) _ = error "This should never occur"
+        step (Just sL, Nothing) a = do
+          resL <- stepL sL a
+          return $ case resL of
+            Partial sL' -> Partial (Just sL', Nothing)
+            Success bL sL' -> Success bL (Just sL', Nothing)
+            Failure bL eL -> Failure bL eL
+        step (Nothing, Just sR) a = do
+          resR <- stepR sR a
+          return $ case resR of
+            Partial sR' -> Partial (Nothing, Just sR') 
+            Success bR sR' -> Success bR (Nothing, Just sR')
+            Failure bR eR -> Failure bR eR
+        step (Just sL, Just sR) a = do
+          resL <- stepL sL a
+          resR <- stepR sR a
+          return $ case (resL, resR) of
+            (Partial sL', Partial sR') -> Partial (Just sL', Just sR')
+            (Partial _, Success bR sR') -> Success bR (Nothing, Just sR')
+            (Partial sL', Failure _ _) -> Partial (Just sL', Nothing)
+            (Success bL sL', Partial _) -> Success bL (Just sL', Nothing)
+            (Success bL sL', Success _ _) -> Success bL (Just sL', Nothing)
+            (Success bL sL', Failure _ _) -> Success bL (Just sL', Nothing)
+            (Failure _ _, Partial sR') -> Partial (Nothing, Just sR') 
+            (Failure _ _, Success bR sR') -> Success bR (Nothing, Just sR') 
+            -- XXX According to my understanding, bL and bR would be same.
+            -- XXX Combine faliures?
+            (Failure bL eL, Failure _ _) -> Failure bL eL
+
+        initial = do
+          resL <- initialL
+          resR <- initialR
+          return $ case (resL, resR) of
+            (Partial sL', Partial sR') -> Partial (Just sL', Just sR')
+            (Partial _, Success bR sR') -> Success bR (Nothing, Just sR')
+            (Partial sL', Failure _ _) -> Partial (Just sL', Nothing)
+            (Success bL sL', Partial _) -> Success bL (Just sL', Nothing)
+            (Success bL sL', Success _ _) -> Success bL (Just sL', Nothing)
+            (Success bL sL', Failure _ _) -> Success bL (Just sL', Nothing)
+            (Failure _ _, Partial sR') -> Partial (Nothing, Just sR') 
+            (Failure _ _, Success bR sR') -> Success bR (Nothing, Just sR') 
+            -- XXX According to my understanding, bL and bR would be same.
+            (Failure bL eL, Failure _ _) -> Failure bL eL
+
+        done (Nothing, Nothing) = error "All the alternatives have failed"        
+        done (Just sL, Nothing) = doneL sL
+        done (Nothing, Just sR) = doneR sR
+        done (_, _) = error "This should never occur"
 
 {-
 -- There are two Alternative instances possible:
@@ -430,4 +473,4 @@ instance (MonadLazy m, Floating b) => Floating (Foldr m a b) where
 
     {-# INLINE logBase #-}
     logBase = liftA2 logBase
-    -}
+-}
