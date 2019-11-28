@@ -251,14 +251,14 @@ instance Monad m => Applicative (Parse m a) where
               resR <- initialR
               case resR of
                 Success bR r  -> let ai = bL ++ bR
-                                  in return $ Success ai $ ParseDone ai f r
+                                 in return $ Success ai $ ParseDone ai f r
                 Partial r     -> return $ Partial $ ParseR [] bL f r
                 Failure b' e' -> return $ Failure b' e'
 
         done (ParseDone _ f x) = do
           r <- doneR x
           return $ f r
-        done _ = error "incomplete or failed parse"
+        done _ = error "Incomplete or failed parse"
 
 {-
 -- XXX The following causes an error as GHC is unable to infer the
@@ -300,63 +300,62 @@ instance Monad m => Monad (Parse m a) where
 -- XXX Can be simplified?
 instance Monad m => Alternative (Parse m a) where
     {-# INLINE empty #-}
-    empty = Parse (\_ _ -> return $ Failure [] "default failure")
-                  (return $ Failure [] "default failure")
-                  (\_ -> error "default failure")
+    empty = Parse (\_ _ -> return $ Failure [] "Default failure")
+                  (return $ Failure [] "Default failure")
+                  (\_ -> error "Default failure")
 
     {-# INLINE (<|>) #-}
-    Parse stepL initialL doneL <|> Parse stepR initialR doneR =
-      Parse step initial done 
+    Parse stepL initialL doneL <|> Parse stepR initialR doneR = Parse step initial done 
       where 
-        -- XXX See the comment about the use of `BufferT`.
         step (Nothing, Nothing) _ = error "This should never occur"
         step (Just sL, Nothing) a = do
           resL <- stepL sL a
           return $ case resL of
-            Partial sL' -> Partial (Just sL', Nothing)
-            Success bL sL' -> Success bL (Just sL', Nothing)
-            Failure bL eL -> Failure bL eL
+            Partial sL'    -> Partial       (Just sL', Nothing)
+            Success bL sL' -> Success bL    (Just sL', Nothing)
+            Failure bL eL  -> Failure bL eL
         step (Nothing, Just sR) a = do
           resR <- stepR sR a
           return $ case resR of
-            Partial sR' -> Partial (Nothing, Just sR') 
-            Success bR sR' -> Success bR (Nothing, Just sR')
-            Failure bR eR -> Failure bR eR
+            Partial sR'    -> Partial       (Nothing, Just sR')
+            Success bR sR' -> Success bR    (Nothing, Just sR')
+            Failure bR eR  -> Failure bR eR
         step (Just sL, Just sR) a = do
           resL <- stepL sL a
           resR <- stepR sR a
           return $ case (resL, resR) of
-            (Partial sL', Partial sR') -> Partial (Just sL', Just sR')
-            (Partial _, Success bR sR') -> Success bR (Nothing, Just sR')
-            (Partial sL', Failure _ _) -> Partial (Just sL', Nothing)
-            (Success bL sL', Partial _) -> Success bL (Just sL', Nothing)
-            (Success bL sL', Success _ _) -> Success bL (Just sL', Nothing)
-            (Success bL sL', Failure _ _) -> Success bL (Just sL', Nothing)
-            (Failure _ _, Partial sR') -> Partial (Nothing, Just sR') 
-            (Failure _ _, Success bR sR') -> Success bR (Nothing, Just sR') 
-            -- XXX According to my understanding, bL and bR would be same.
-            -- XXX Combine faliures?
-            (Failure bL eL, Failure _ _) -> Failure bL eL
+            (Partial sL'   , Partial sR')    -> Partial    (Just sL', Just sR')
+            (Partial _     , Success bR sR') -> Success bR (Nothing , Just sR')
+            (Partial sL'   , Failure _ _)    -> Partial    (Just sL', Nothing)
+            (Success bL sL', Partial _)      -> Success bL (Just sL', Nothing)
+            (Success bL sL', Success _ _)    -> Success bL (Just sL', Nothing)
+            (Success bL sL', Failure _ _)    -> Success bL (Just sL', Nothing)
+            (Failure _ _   , Partial sR')    -> Partial    (Nothing , Just sR')
+            (Failure _ _   , Success bR sR') -> Success bR (Nothing , Just sR')
+            -- XXX How will you combine faliures?
+            -- XXX Does this affect the associativity in any way?
+            (Failure bL eL, Failure _ _)     -> Failure bL eL
 
         initial = do
           resL <- initialL
           resR <- initialR
+          -- Abstract the caseStep?
           return $ case (resL, resR) of
-            (Partial sL', Partial sR') -> Partial (Just sL', Just sR')
-            (Partial _, Success bR sR') -> Success bR (Nothing, Just sR')
-            (Partial sL', Failure _ _) -> Partial (Just sL', Nothing)
-            (Success bL sL', Partial _) -> Success bL (Just sL', Nothing)
-            (Success bL sL', Success _ _) -> Success bL (Just sL', Nothing)
-            (Success bL sL', Failure _ _) -> Success bL (Just sL', Nothing)
-            (Failure _ _, Partial sR') -> Partial (Nothing, Just sR') 
-            (Failure _ _, Success bR sR') -> Success bR (Nothing, Just sR') 
-            -- XXX According to my understanding, bL and bR would be same.
-            (Failure bL eL, Failure _ _) -> Failure bL eL
+            (Partial sL'   , Partial sR')    -> Partial    (Just sL', Just sR')
+            (Partial _     , Success bR sR') -> Success bR (Nothing , Just sR')
+            (Partial sL'   , Failure _ _)    -> Partial    (Just sL', Nothing)
+            (Success bL sL', Partial _)      -> Success bL (Just sL', Nothing)
+            (Success bL sL', Success _ _)    -> Success bL (Just sL', Nothing)
+            (Success bL sL', Failure _ _)    -> Success bL (Just sL', Nothing)
+            (Failure _ _   , Partial sR')    -> Partial    (Nothing , Just sR')
+            (Failure _ _   , Success bR sR') -> Success bR (Nothing , Just sR')
+            -- XXX How will you combine faliures?
+            -- XXX Does this affect the associativity in any way?
+            (Failure bL eL , Failure _ _)    -> Failure bL eL
 
-        done (Nothing, Nothing) = error "All the alternatives have failed"        
         done (Just sL, Nothing) = doneL sL
         done (Nothing, Just sR) = doneR sR
-        done (_, _) = error "This should never occur"
+        done (_, _)             = error "This should never occur"
 
 {-
 -- There are two Alternative instances possible:
