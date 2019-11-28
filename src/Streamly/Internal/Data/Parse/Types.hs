@@ -239,7 +239,7 @@ instance Monad m => Applicative (Parse m a) where
                       sb = b ++ pb
                   in return $ Success sb $ ParseDone sb f r
                 Partial r   -> go ps
-                Failure b e -> return $ Failure (li ++ b) e
+                Failure b e -> return $ Failure (li ++ b ++ ps) e
 
         initial = do
           resL <- initialL
@@ -295,7 +295,7 @@ instance Monad m => Monad (Parse m a) where
 
 -- XXX We should perhaps have just "Alt" implementation instead of
 -- "Alternative".  Because we do not have a sensible identity for Alternative.
---
+
 -- XXX This gets the first successful fold.
 -- XXX Can be simplified?
 instance Monad m => Alternative (Parse m a) where
