@@ -206,37 +206,40 @@ instance Monad m => Applicative (Parse m a) where
         step (ParseL l bi) a = do
           resL <- stepL l a
           case resL of
-            -- XXX Use a queue instead of lists?
-            Partial x -> return $ Partial $ ParseL x (a:bi)
+            -- XXX Used (++) to preserve meaning, change this later
+            Partial x -> return $ Partial $ ParseL x (bi ++ [a])
             Failure b e -> return $ Failure b e
             Success bL x -> do
               f <- doneL x
               resR <- initialR
               case resR of
-                Success bR r  -> let ai = bL ++ bR
-                                  in return $ Success ai $ ParseDone ai f r
-                Partial r    -> return $ Partial $ ParseR (reverse bi) bL f r
+                Success bR r -> let ai = bL ++ bR
+                                in return $ Success ai $ ParseDone ai f r
+                Partial r    -> return $ Partial $ ParseR bi bL f r
                 Failure b e  -> return $ Failure b e
 
-        step (ParseDone b f x) a = return $ Success ai (ParseDone ai f x)
-          where ai = b ++ [a]
+        -- XXX Used (++) to preserve meaning, change this later
+        step (ParseDone b f x) a = let ai = b ++ [a]
+                                   in return $ Success ai (ParseDone ai f x)
 
-        step (ParseR li [] f x) a = do
-          resR <- stepR x a
-          case resR of
-            Success b r -> return $ Success b $ ParseDone b f r
-            Partial r   -> return $ Partial $ ParseR li [] f r
-            Failure b e -> return $ Failure (li ++ b) e
-
-        step (ParseR li (m:ms) f x) a = do
-          resR <- stepR x m
-          case resR of
-            Success b r ->
-              let sb = b ++ pb
-               in return $ Success sb $ ParseDone sb f r
-            Partial r ->   return $ Partial $ ParseR li pb f r
-            Failure b e -> return $ Failure (li ++ b) e
-          where pb = ms ++ [a]
+        step (ParseR li ms f x) a = go ms
+          where
+            go [] = do
+              resR <- stepR x a
+              case resR of
+                Success b r -> return $ Success b $ ParseDone b f r
+                Partial r   -> return $ Partial $ ParseR li [] f r
+                Failure b e -> return $ Failure (li ++ b) e
+            go (p:ps) = do
+              resR <- stepR x p
+              case resR of
+                Success b r ->
+                  -- XXX Used (++) to preserve meaning, change this later
+                  let pb = ps ++ [a]
+                      sb = b ++ pb
+                  in return $ Success sb $ ParseDone sb f r
+                Partial r   -> go ps
+                Failure b e -> return $ Failure (li ++ b) e
 
         initial = do
           resL <- initialL
