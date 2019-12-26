@@ -321,6 +321,8 @@ main =
         , benchIOSink "tap" (Ops.tap 1)
         , benchIOSink "tapAsync" (Ops.tapAsync 1)
         , benchIOSink "tapAsyncS" (Ops.tapAsyncS 1)
+        , bench "reassembleBy_Fav" $ nfIO $ randomRIO (5,5) >>= Ops.favBench
+        , bench "reassembleBy_Unfav" $ nfIO $ randomRIO (5,5) >>= Ops.unfavBench
         ]
       , bgroup "transformationX4"
         [ benchIOSink "scan" (Ops.scan 4)

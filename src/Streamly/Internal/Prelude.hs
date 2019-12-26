@@ -420,7 +420,7 @@ module Streamly.Internal.Prelude
     , fromHandle
     , toHandle
 
-    -- XXX Shift/Change?
+    -- XXX Change the position
     -- * Reordering
     , reassembleBy
     )
@@ -3532,7 +3532,6 @@ splitInnerBySuffix splitter joiner xs =
 ------------------------------------------------------------------------------
 -- Reorder in sequence
 ------------------------------------------------------------------------------
-
 
 -- Buffer until the next element in sequence arrives. The function argument
 -- determines the difference in sequence numbers. This could be useful in

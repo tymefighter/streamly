@@ -33,7 +33,8 @@ import Prelude
        (Monad, Int, (+), ($), (.), return, fmap, even, (>), (<=), (==), (>=),
         subtract, undefined, Maybe(..), odd, Bool, not, (>>=), mapM_, curry,
         maxBound, div, IO, compare, Double, fromIntegral, Integer, (<$>),
-        (<*>), flip, (**), (/))
+        (<*>), flip, (**), (/), Bounded(..), Num(..), Eq, Ord, Integral(..), print,
+        (=<<))
 import qualified Prelude as P
 import qualified Data.Foldable as F
 import qualified GHC.Exts as GHC
@@ -936,3 +937,45 @@ foldableSum = P.sum
 {-# INLINE traversableMapM #-}
 traversableMapM :: Stream Identity Int -> IO (Stream Identity Int)
 traversableMapM = P.mapM return
+
+-- Benchmark for reassembleBy
+newtype BoundedZ = BoundedZ Int deriving (Eq, Ord)
+
+instance Num BoundedZ where
+    (BoundedZ x) + (BoundedZ y) = BoundedZ (x + y)
+    (BoundedZ x) * (BoundedZ y) = BoundedZ (x * y)
+    (BoundedZ x) - (BoundedZ y) = BoundedZ (x - y)
+    fromInteger = BoundedZ . fromIntegral
+
+instance Bounded BoundedZ where
+    minBound = BoundedZ 0
+    maxBound = BoundedZ 100000000 
+
+diff :: BoundedZ -> BoundedZ -> Int
+diff (BoundedZ x) (BoundedZ y) = x - y
+
+favBench :: Int -> IO ()
+favBench i = S.drain $ Internal.reassembleBy i diff favSrc  
+    where
+        favSrc = S.unfoldr step (BoundedZ 0)
+            where
+                step cnt =
+                    if cnt > BoundedZ value
+                    then Nothing
+                    else Just (cnt, cnt + 1)
+
+unfavBench :: Int -> IO ()
+unfavBench i = S.drain $ Internal.reassembleBy i diff unfavSrc
+    where
+        unfavSrc = S.unfoldr step (BoundedZ (i - 1))
+            where
+                step cnt
+                    | cnt > BoundedZ value = Nothing
+                    | unb cnt `rem` i == 0 = Just (cnt, cnt + 2 * BoundedZ i - 1)
+                    | P.otherwise = Just (cnt, cnt - 1)
+                unb (BoundedZ x) = x
+
+
+
+
+
