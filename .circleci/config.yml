@@ -200,12 +200,12 @@ jobs:
               COVERALLS_OPTIONS: "--repo-token=KlGN45lDWQkw55TNm18nkam2EXRg9lCSH --coverage-mode=StrictlyFullLines --exclude-dir=test test"
               GHC_OPTIONS: "-DCOVERAGE_BUILD"
             command: |
-              apt-get install -y ghc-8.2.2
-              apt-get install -y cabal-install-2.4
+              apt-get install -y ghc-8.2.2 --allow-unauthenticated
+              apt-get install -y cabal-install-2.4 --allow-unauthenticated
               # required by hpc-coveralls
-              apt-get install -y libcurl4-gnutls-dev
-              apt-get install -y git
-              apt-get install libtinfo-dev
+              apt-get install -y libcurl4-gnutls-dev --allow-unauthenticated
+              apt-get install -y git --allow-unauthenticated
+              apt-get install libtinfo-dev --allow-unauthenticated
               bash -c "$PACKCHECK cabal-v1"
         - *save
 
