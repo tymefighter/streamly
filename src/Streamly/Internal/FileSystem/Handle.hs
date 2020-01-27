@@ -114,6 +114,7 @@ import Foreign.Ptr (minusPtr, plusPtr)
 import Foreign.Storable (Storable(..))
 import GHC.ForeignPtr (mallocPlainForeignPtrBytes)
 import System.IO (Handle, hGetBufSome, hPutBuf, stdin, stdout)
+import System.IO.Unsafe (unsafeInterleaveIO)
 import Prelude hiding (read)
 
 import Streamly (MonadAsync)
@@ -219,8 +220,8 @@ readChunksWithBufferOf :: MonadIO m => Unfold m (Int, Handle) (Array Word8)
 readChunksWithBufferOf = Unfold step return
     where
     {-# INLINE_LATE step #-}
-    step (size, h) = do
-        arr <- liftIO $ readArrayUpto size h
+    step (size, h) = liftIO $ unsafeInterleaveIO $ do
+        arr <- readArrayUpto size h
         return $
             case A.length arr of
                 0 -> D.Stop
