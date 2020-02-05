@@ -10,7 +10,7 @@
 #include "inline.hs"
 
 -- |
--- Module      : Streamly.Internal.Memory.Array.Types
+-- Module      : Streamly.Internal.Memory.Mutable.Array.Types
 -- Copyright   : (c) 2019 Composewell Technologies
 --
 -- License     : BSD3
@@ -18,18 +18,21 @@
 -- Stability   : experimental
 -- Portability : GHC
 --
-module Streamly.Internal.Memory.Array.Types
+module Streamly.Internal.Memory.Mutable.Array.Types
     (
       Array (..)
-    , unsafeFreeze
-    , unsafeThraw
+    , mutableArray
 
     -- * Construction
---    , withNewArray
---    , newArray
---    , unsafeSnoc
---    , snoc
---    , spliceWithDoubling
+    , withNewArray
+    , newArray
+    , newArrayAligned
+    , newArrayAlignedUnmanaged
+    , newArrayAlignedAllocWith
+    , unsafeSnoc
+    , snoc
+    , spliceWith
+    , spliceWithDoubling
     , spliceTwo
 
     , fromList
@@ -55,7 +58,7 @@ module Streamly.Internal.Memory.Array.Types
     , unsafeIndex
     , length
     , byteLength
---    , byteCapacity
+    , byteCapacity
     , foldl'
     , foldr
     , splitAt
@@ -66,6 +69,7 @@ module Streamly.Internal.Memory.Array.Types
     , toStreamKRev
     , toList
     , toArrayMinChunk
+    , writeNAllocWith
     , writeN
     , writeNUnsafe
     , writeNAligned
@@ -78,8 +82,8 @@ module Streamly.Internal.Memory.Array.Types
     , mkChunkSize
     , mkChunkSizeKB
     , unsafeInlineIO
---    , realloc
---    , shrinkToFit
+    , realloc
+    , shrinkToFit
     , memcpy
     , memcmp
     , bytesToElemCount
@@ -116,13 +120,11 @@ import Streamly.Internal.Data.Fold.Types (Fold(..))
 import Streamly.Internal.Data.Strict (Tuple'(..))
 import Streamly.Internal.Data.SVar (adaptState)
 
-import qualified Streamly.Internal.Memory.Mutable.Array.Types as MA
-
 #if !defined(mingw32_HOST_OS)
 import Streamly.FileSystem.FDIO (IOVec(..))
 #endif
 
--- import qualified Streamly.Memory.Malloc as Malloc
+import qualified Streamly.Memory.Malloc as Malloc
 import qualified Streamly.Internal.Data.Stream.StreamD.Type as D
 import qualified Streamly.Internal.Data.Stream.StreamK as K
 import qualified GHC.Exts as Exts
@@ -194,14 +196,11 @@ data Array a =
     Array
     { aStart :: {-# UNPACK #-} !(ForeignPtr a) -- first address
     , aEnd   :: {-# UNPACK #-} !(Ptr a)        -- first unused address
+    , aBound :: {-# UNPACK #-} !(Ptr a)        -- first address beyond allocated memory
     }
 
--- XXX Use shrink to fit?
-unsafeFreeze :: MA.Array a -> Array a
-unsafeFreeze (MA.Array as ae _) = Array as ae
-
-unsafeThraw :: Array a -> MA.Array a
-unsafeThraw (Array as ae) = MA.Array as ae ae
+mutableArray :: ForeignPtr a -> Ptr a -> Ptr a -> Array a
+mutableArray = Array
 
 -------------------------------------------------------------------------------
 -- Utility functions
@@ -245,7 +244,6 @@ bytesToElemCount x n =
 -- Construction
 -------------------------------------------------------------------------------
 
-{-
 -- | allocate a new array using the provided allocator function.
 {-# INLINE newArrayAlignedAllocWith #-}
 newArrayAlignedAllocWith :: forall a. Storable a
@@ -365,7 +363,6 @@ shrinkToFit arr@Array{..} = do
     if used < 3 * waste
     then realloc used arr
     else return arr
- -}
 
 -- XXX when converting an array of Word8 from a literal string we can simply
 -- refer to the literal string. Is it possible to write rules such that
@@ -387,6 +384,7 @@ _fromCStringAddrUnsafe addr# = do
     return $ Array
         { aStart = ptr
         , aEnd   = end
+        , aBound = end
         }
   where
     cstr :: CString
@@ -432,14 +430,12 @@ byteLength Array{..} =
 length :: forall a. Storable a => Array a -> Int
 length arr = byteLength arr `div` sizeOf (undefined :: a)
 
-{-
 {-# INLINE byteCapacity #-}
 byteCapacity :: Array a -> Int
 byteCapacity Array{..} =
     let p = unsafeForeignPtrToPtr aStart
         len = aBound `minusPtr` p
     in assert (len >= 0) len
--}
 
 {-# INLINE_NORMAL toStreamD #-}
 toStreamD :: forall m a. (Monad m, Storable a) => Array a -> D.Stream m a
@@ -529,8 +525,19 @@ foldr f z arr = runIdentity $ D.foldr f z $ toStreamD arr
 
 {-# INLINE_NORMAL writeNAllocWith #-}
 writeNAllocWith :: forall m a. (MonadIO m, Storable a)
-    => (Int -> IO (MA.Array a)) -> Int -> Fold m a (Array a)
-writeNAllocWith alloc n = unsafeFreeze <$> MA.writeNAllocWith alloc n
+    => (Int -> IO (Array a)) -> Int -> Fold m a (Array a)
+writeNAllocWith alloc n = Fold step initial extract
+
+    where
+
+    initial = liftIO $ alloc (max n 0)
+    step arr@(Array _ end bound) _ | end == bound = return arr
+    step (Array start end bound) x = do
+        liftIO $ poke end x
+        return $ Array start (end `plusPtr` sizeOf (undefined :: a)) bound
+    -- XXX note that shirkToFit does not maintain alignment, in case we are
+    -- using aligned allocation.
+    extract = return -- liftIO . shrinkToFit
 
 -- | @writeN n@ folds a maximum of @n@ elements from the input stream to an
 -- 'Array'.
@@ -538,7 +545,7 @@ writeNAllocWith alloc n = unsafeFreeze <$> MA.writeNAllocWith alloc n
 -- @since 0.7.0
 {-# INLINE_NORMAL writeN #-}
 writeN :: forall m a. (MonadIO m, Storable a) => Int -> Fold m a (Array a)
-writeN = writeNAllocWith MA.newArray
+writeN = writeNAllocWith newArray
 
 -- | @writeNAligned alignment n@ folds a maximum of @n@ elements from the input
 -- stream to an 'Array' aligned to the given size.
@@ -548,7 +555,7 @@ writeN = writeNAllocWith MA.newArray
 {-# INLINE_NORMAL writeNAligned #-}
 writeNAligned :: forall m a. (MonadIO m, Storable a)
     => Int -> Int -> Fold m a (Array a)
-writeNAligned alignSize = writeNAllocWith (MA.newArrayAligned alignSize)
+writeNAligned alignSize = writeNAllocWith (newArrayAligned alignSize)
 
 -- | @writeNAlignedUnmanaged n@ folds a maximum of @n@ elements from the input
 -- stream to an 'Array' aligned to the given size and using unmanaged memory.
@@ -561,13 +568,12 @@ writeNAligned alignSize = writeNAllocWith (MA.newArrayAligned alignSize)
 writeNAlignedUnmanaged :: forall m a. (MonadIO m, Storable a)
     => Int -> Int -> Fold m a (Array a)
 writeNAlignedUnmanaged alignSize =
-    writeNAllocWith (MA.newArrayAlignedUnmanaged alignSize)
+    writeNAllocWith (newArrayAlignedUnmanaged alignSize)
 
-{-
 data ArrayUnsafe a = ArrayUnsafe
     {-# UNPACK #-} !(ForeignPtr a) -- first address
     {-# UNPACK #-} !(Ptr a)        -- first unused address
--}
+
 -- | Like 'writeN' but does not check the array bounds when writing. The fold
 -- driver must not call the step function more than 'n' times otherwise it will
 -- corrupt the memory and crash. This function exists mainly because any
@@ -578,7 +584,17 @@ data ArrayUnsafe a = ArrayUnsafe
 {-# INLINE_NORMAL writeNUnsafe #-}
 writeNUnsafe :: forall m a. (MonadIO m, Storable a)
     => Int -> Fold m a (Array a)
-writeNUnsafe n = unsafeFreeze <$> MA.writeNUnsafe n
+writeNUnsafe n = Fold step initial extract
+
+    where
+
+    initial = do
+        (Array start end _) <- liftIO $ newArray (max n 0)
+        return $ ArrayUnsafe start end
+    step (ArrayUnsafe start end) x = do
+        liftIO $ poke end x
+        return $ (ArrayUnsafe start (end `plusPtr` sizeOf (undefined :: a)))
+    extract (ArrayUnsafe start end) = return $ Array start end end -- liftIO . shrinkToFit
 
 -- XXX The realloc based implementation needs to make one extra copy if we use
 -- shrinkToFit.  On the other hand, the stream of arrays implementation may
@@ -596,7 +612,25 @@ writeNUnsafe n = unsafeFreeze <$> MA.writeNUnsafe n
 toArrayMinChunk :: forall m a. (MonadIO m, Storable a)
     => Int -> Int -> Fold m a (Array a)
 -- toArrayMinChunk n = FL.mapM spliceArrays $ toArraysOf n
-toArrayMinChunk alignSize elemCount = unsafeFreeze <$> MA.toArrayMinChunk alignSize elemCount
+toArrayMinChunk alignSize elemCount = Fold step initial extract
+
+    where
+
+    insertElem (Array start end bound) x = do
+        liftIO $ poke end x
+        return $ Array start (end `plusPtr` sizeOf (undefined :: a)) bound
+
+    initial = do
+        when (elemCount < 0) $ error "toArrayMinChunk: elemCount is negative"
+        liftIO $ newArrayAligned alignSize elemCount
+    step arr@(Array start end bound) x | end == bound = do
+        let p = unsafeForeignPtrToPtr start
+            oldSize = end `minusPtr` p
+            newSize = max (oldSize * 2) 1
+        arr1 <- liftIO $ reallocAligned alignSize newSize arr
+        insertElem arr1 x
+    step arr x = insertElem arr x
+    extract = liftIO . shrinkToFit
 
 -- | Fold the whole input to a single array.
 --
@@ -627,9 +661,16 @@ writeAligned alignSize =
 {-# INLINE_NORMAL fromStreamDN #-}
 fromStreamDN :: forall m a. (MonadIO m, Storable a)
     => Int -> D.Stream m a -> m (Array a)
-fromStreamDN limit str = unsafeFreeze <$> MA.fromStreamDN limit str
+fromStreamDN limit str = do
+    arr <- liftIO $ newArray limit
+    end <- D.foldlM' fwrite (aEnd arr) $ D.take limit str
+    return $ arr {aEnd = end}
 
-{-
+    where
+
+    fwrite ptr x = do
+        liftIO $ poke ptr x
+        return $ ptr `plusPtr` sizeOf (undefined :: a)
 
 data GroupState s start end bound
     = GroupStart s
@@ -637,15 +678,43 @@ data GroupState s start end bound
     | GroupYield start end bound (GroupState s start end bound)
     | GroupFinish
 
--}
-
 -- | @fromStreamArraysOf n stream@ groups the input stream into a stream of
 -- arrays of size n.
 {-# INLINE_NORMAL fromStreamDArraysOf #-}
 fromStreamDArraysOf :: forall m a. (MonadIO m, Storable a)
     => Int -> D.Stream m a -> D.Stream m (Array a)
 -- fromStreamDArraysOf n str = D.groupsOf n (writeN n) str
-fromStreamDArraysOf n str = D.map unsafeFreeze $ MA.fromStreamDArraysOf n str
+fromStreamDArraysOf n (D.Stream step state) =
+    D.Stream step' (GroupStart state)
+
+    where
+
+    {-# INLINE_LATE step' #-}
+    step' _ (GroupStart st) = do
+        when (n <= 0) $
+            -- XXX we can pass the module string from the higher level API
+            error $ "Streamly.Internal.Memory.Mutable.Array.Types.fromStreamDArraysOf: the size of "
+                 ++ "arrays [" ++ show n ++ "] must be a natural number"
+        Array start end bound <- liftIO $ newArray n
+        return $ D.Skip (GroupBuffer st start end bound)
+
+    step' gst (GroupBuffer st start end bound) = do
+        r <- step (adaptState gst) st
+        case r of
+            D.Yield x s -> do
+                liftIO $ poke end x
+                let end' = end `plusPtr` sizeOf (undefined :: a)
+                return $
+                    if end' >= bound
+                    then D.Skip (GroupYield start end' bound (GroupStart s))
+                    else D.Skip (GroupBuffer s start end' bound)
+            D.Skip s -> return $ D.Skip (GroupBuffer s start end bound)
+            D.Stop -> return $ D.Skip (GroupYield start end bound GroupFinish)
+
+    step' _ (GroupYield start end bound next) =
+        return $ D.Yield (Array start end bound) next
+
+    step' _ GroupFinish = return D.Stop
 
 -- XXX concatMap does not seem to have the best possible performance so we have
 -- a custom way to concat arrays.
@@ -897,7 +966,23 @@ instance Foldable Array where
 -- Splice two immutable arrays creating a new array.
 {-# INLINE spliceTwo #-}
 spliceTwo :: (MonadIO m, Storable a) => Array a -> Array a -> m (Array a)
-spliceTwo arr1 arr2 = unsafeFreeze <$> MA.spliceTwo (unsafeThraw arr1) (unsafeThraw arr2)
+spliceTwo arr1 arr2 = do
+    let src1 = unsafeForeignPtrToPtr (aStart arr1)
+        src2 = unsafeForeignPtrToPtr (aStart arr2)
+        len1 = aEnd arr1 `minusPtr` src1
+        len2 = aEnd arr2 `minusPtr` src2
+
+    arr <- liftIO $ newArray (len1 + len2)
+    let dst = unsafeForeignPtrToPtr (aStart arr)
+
+    -- XXX Should we use copyMutableByteArray# instead? Is there an overhead to
+    -- ccall?
+    liftIO $ do
+        memcpy (castPtr dst) (castPtr src1) len1
+        touchForeignPtr (aStart arr1)
+        memcpy (castPtr (dst `plusPtr` len1)) (castPtr src2) len2
+        touchForeignPtr (aStart arr2)
+    return arr { aEnd = dst `plusPtr` (len1 + len2) }
 
 instance Storable a => Semigroup (Array a) where
     arr1 <> arr2 = unsafePerformIO $ spliceTwo arr1 arr2
@@ -910,7 +995,7 @@ nil ::
     Storable a =>
 #endif
     Array a
-nil = Array nullForeignPtr (Ptr nullAddr#)
+nil = Array nullForeignPtr (Ptr nullAddr#) (Ptr nullAddr#)
 
 instance Storable a => Monoid (Array a) where
     mempty = nil
@@ -963,7 +1048,6 @@ unlines sep (D.Stream step state) = D.Stream step' (OuterLoop state)
         return $ D.Yield x (InnerLoop st startf
                             (p `plusPtr` (sizeOf (undefined :: a))) end)
 
-{-
 -- Splice an array into a pre-reserved mutable array.  The user must ensure
 -- that there is enough space in the mutable array.
 {-# INLINE spliceWith #-}
@@ -1003,12 +1087,59 @@ data SpliceState s arr
     | SpliceBuffering s arr
     | SpliceYielding arr (SpliceState s arr)
     | SpliceFinish
--}
 
+-- XXX can use general grouping combinators to achieve this?
+-- | Coalesce adjacent arrays in incoming stream to form bigger arrays of a
+-- maximum specified size. Note that if a single array is bigger than the
+-- specified size we do not split it to fit. When we coalesce multiple arrays
+-- if the size would exceed the specified size we do not coalesce therefore the
+-- actual array size may be less than the specified chunk size.
+--
+-- @since 0.7.0
 {-# INLINE_NORMAL packArraysChunksOf #-}
 packArraysChunksOf :: (MonadIO m, Storable a)
     => Int -> D.Stream m (Array a) -> D.Stream m (Array a)
-packArraysChunksOf n str = D.map unsafeFreeze $ MA.packArraysChunksOf n $ D.map unsafeThraw str
+packArraysChunksOf n (D.Stream step state) =
+    D.Stream step' (SpliceInitial state)
+
+    where
+
+    {-# INLINE_LATE step' #-}
+    step' gst (SpliceInitial st) = do
+        when (n <= 0) $
+            -- XXX we can pass the module string from the higher level API
+            error $ "Streamly.Internal.Memory.Mutable.Array.Types.packArraysChunksOf: the size of "
+                 ++ "arrays [" ++ show n ++ "] must be a natural number"
+        r <- step gst st
+        case r of
+            D.Yield arr s -> return $
+                let len = byteLength arr
+                 in if len >= n
+                    then D.Skip (SpliceYielding arr (SpliceInitial s))
+                    else D.Skip (SpliceBuffering s arr)
+            D.Skip s -> return $ D.Skip (SpliceInitial s)
+            D.Stop -> return $ D.Stop
+
+    step' gst (SpliceBuffering st buf) = do
+        r <- step gst st
+        case r of
+            D.Yield arr s -> do
+                let len = byteLength buf + byteLength arr
+                if len > n
+                then return $
+                    D.Skip (SpliceYielding buf (SpliceBuffering s arr))
+                else do
+                    buf' <- if byteCapacity buf < n
+                            then liftIO $ realloc n buf
+                            else return buf
+                    buf'' <- spliceWith buf' arr
+                    return $ D.Skip (SpliceBuffering s buf'')
+            D.Skip s -> return $ D.Skip (SpliceBuffering s buf)
+            D.Stop -> return $ D.Skip (SpliceYielding buf SpliceFinish)
+
+    step' _ SpliceFinish = return D.Stop
+
+    step' _ (SpliceYielding arr next) = return $ D.Yield arr next
 
 -- XXX instead of writing two different versions of this operation, we should
 -- write it as a pipe.
@@ -1023,14 +1154,14 @@ lpackArraysChunksOf n (Fold step1 initial1 extract1) =
     initial = do
         when (n <= 0) $
             -- XXX we can pass the module string from the higher level API
-            error $ "Streamly.Internal.Memory.Array.Types.packArraysChunksOf: the size of "
+            error $ "Streamly.Internal.Memory.Mutable.Array.Types.packArraysChunksOf: the size of "
                  ++ "arrays [" ++ show n ++ "] must be a natural number"
         r1 <- initial1
         return (Tuple' Nothing r1)
 
     extract (Tuple' Nothing r1) = extract1 r1
     extract (Tuple' (Just buf) r1) = do
-        r <- step1 r1 (unsafeFreeze buf)
+        r <- step1 r1 buf
         extract1 r
 
     step (Tuple' Nothing r1) arr = do
@@ -1041,31 +1172,30 @@ lpackArraysChunksOf n (Fold step1 initial1 extract1) =
                     extract1 r
                     r1' <- initial1
                     return (Tuple' Nothing r1')
-                else return (Tuple' (Just (unsafeThraw arr)) r1)
+                else return (Tuple' (Just arr) r1)
 
     step (Tuple' (Just buf) r1) arr = do
-            let len = MA.byteLength buf + byteLength arr
-            buf' <- if MA.byteCapacity buf < len
-                    then liftIO $ MA.realloc (max n len) buf
+            let len = byteLength buf + byteLength arr
+            buf' <- if byteCapacity buf < len
+                    then liftIO $ realloc (max n len) buf
                     else return buf
-            buf'' <- MA.spliceWith buf' (unsafeThraw arr)
+            buf'' <- spliceWith buf' arr
 
             if len >= n
             then do
-                r <- step1 r1 (unsafeFreeze buf'')
+                r <- step1 r1 buf''
                 extract1 r
                 r1' <- initial1
                 return (Tuple' Nothing r1')
             else return (Tuple' (Just buf'') r1)
 
 #if !defined(mingw32_HOST_OS)
-{-
 data GatherState s arr
     = GatherInitial s
     | GatherBuffering s arr Int
     | GatherYielding arr (GatherState s arr)
     | GatherFinish
--}
+
 -- | @groupIOVecsOf maxBytes maxEntries@ groups arrays in the incoming stream
 -- to create a stream of 'IOVec' arrays with a maximum of @maxBytes@ bytes in
 -- each array and a maximum of @maxEntries@ entries in each array.
@@ -1074,7 +1204,59 @@ data GatherState s arr
 {-# INLINE_NORMAL groupIOVecsOf #-}
 groupIOVecsOf :: MonadIO m
     => Int -> Int -> D.Stream m (Array a) -> D.Stream m (Array IOVec)
-groupIOVecsOf n maxIOVLen str = D.map unsafeFreeze $ MA.groupIOVecsOf n maxIOVLen $ D.map unsafeThraw str
+groupIOVecsOf n maxIOVLen (D.Stream step state) =
+    D.Stream step' (GatherInitial state)
+
+    where
+
+    {-# INLINE_LATE step' #-}
+    step' gst (GatherInitial st) = do
+        when (n <= 0) $
+            -- XXX we can pass the module string from the higher level API
+            error $ "Streamly.Internal.Memory.Mutable.Array.Types.groupIOVecsOf: the size of "
+                 ++ "groups [" ++ show n ++ "] must be a natural number"
+        when (maxIOVLen <= 0) $
+            -- XXX we can pass the module string from the higher level API
+            error $ "Streamly.Internal.Memory.Mutable.Array.Types.groupIOVecsOf: the number of "
+                 ++ "IOVec entries [" ++ show n ++ "] must be a natural number"
+        r <- step (adaptState gst) st
+        case r of
+            D.Yield arr s -> do
+                let p = unsafeForeignPtrToPtr (aStart arr)
+                    len = byteLength arr
+                iov <- liftIO $ newArray maxIOVLen
+                iov' <- liftIO $ unsafeSnoc iov (IOVec (castPtr p)
+                                                (fromIntegral len))
+                if len >= n
+                then return $ D.Skip (GatherYielding iov' (GatherInitial s))
+                else return $ D.Skip (GatherBuffering s iov' len)
+            D.Skip s -> return $ D.Skip (GatherInitial s)
+            D.Stop -> return $ D.Stop
+
+    step' gst (GatherBuffering st iov len) = do
+        r <- step (adaptState gst) st
+        case r of
+            D.Yield arr s -> do
+                let p = unsafeForeignPtrToPtr (aStart arr)
+                    alen = byteLength arr
+                    len' = len + alen
+                if len' > n || length iov >= maxIOVLen
+                then do
+                    iov' <- liftIO $ newArray maxIOVLen
+                    iov'' <- liftIO $ unsafeSnoc iov' (IOVec (castPtr p)
+                                                      (fromIntegral alen))
+                    return $ D.Skip (GatherYielding iov
+                                        (GatherBuffering s iov'' alen))
+                else do
+                    iov' <- liftIO $ unsafeSnoc iov (IOVec (castPtr p)
+                                                    (fromIntegral alen))
+                    return $ D.Skip (GatherBuffering s iov' len')
+            D.Skip s -> return $ D.Skip (GatherBuffering s iov len)
+            D.Stop -> return $ D.Skip (GatherYielding iov GatherFinish)
+
+    step' _ GatherFinish = return D.Stop
+
+    step' _ (GatherYielding iov next) = return $ D.Yield iov next
 #endif
 
 -- | Create two slices of an array without copying the original array. The
@@ -1094,10 +1276,12 @@ splitAt i arr@Array{..} =
                 in ( Array
                   { aStart = aStart
                   , aEnd = p
+                  , aBound = p
                   }
                 , Array
                   { aStart = aStart `plusForeignPtr` off
                   , aEnd = aEnd
+                  , aBound = aBound
                   }
                 )
 
@@ -1115,10 +1299,12 @@ breakOn sep arr@Array{..} = liftIO $ do
             ( Array
                 { aStart = aStart
                 , aEnd = loc
+                , aBound = loc
                 }
             , Just $ Array
                     { aStart = aStart `plusForeignPtr` (loc `minusPtr` p + 1)
                     , aEnd = aEnd
+                    , aBound = aBound
                     }
             )
 

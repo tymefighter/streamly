@@ -226,7 +226,7 @@ read :: forall m a. (Monad m, Storable a) => Unfold m (Array a) a
 read = Unfold step inject
     where
 
-    inject (Array (ForeignPtr start contents) (Ptr end) _) =
+    inject (Array (ForeignPtr start contents) (Ptr end)) =
         return $ ReadUState (ForeignPtr end contents) (Ptr start)
 
     {-# INLINE_LATE step #-}
@@ -260,7 +260,7 @@ unsafeRead :: forall m a. (Monad m, Storable a) => Unfold m (Array a) a
 unsafeRead = Unfold step inject
     where
 
-    inject (Array fp _ _) = return fp
+    inject (Array fp _) = return fp
 
     {-# INLINE_LATE step #-}
     step (ForeignPtr p contents) = do

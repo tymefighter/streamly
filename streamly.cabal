@@ -309,6 +309,7 @@ library
                      , Streamly.Internal.Data.Array
                      , Streamly.Internal.Data.Prim.Array
                      , Streamly.Internal.Data.SmallArray
+                     , Streamly.Internal.Memory.Mutable.Array.Types
                      , Streamly.Internal.Memory.Array.Types
                      , Streamly.Internal.Memory.Array
                      , Streamly.Internal.Memory.ArrayStream
@@ -708,7 +709,7 @@ benchmark prim-array
   if impl(ghc < 8.0)
     build-depends:
         transformers  >= 0.4 && < 0.6
-        
+
 benchmark small-array
   import: bench-options
   type: exitcode-stdio-1.0

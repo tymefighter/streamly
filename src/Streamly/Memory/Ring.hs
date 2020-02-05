@@ -106,7 +106,7 @@ unsafeEqArrayN Ring{..} rh A.Array{..} n =
     let !res = A.unsafeInlineIO $ do
             let rs = unsafeForeignPtrToPtr ringStart
             let as = unsafeForeignPtrToPtr aStart
-            assert (aBound `minusPtr` as >= ringBound `minusPtr` rs) (return ())
+            assert (aEnd `minusPtr` as >= ringBound `minusPtr` rs) (return ())
             let len = ringBound `minusPtr` rh
             r1 <- A.memcmp (castPtr rh) (castPtr as) (min len n)
             r2 <- if n > len
@@ -132,7 +132,7 @@ unsafeEqArray Ring{..} rh A.Array{..} =
     let !res = A.unsafeInlineIO $ do
             let rs = unsafeForeignPtrToPtr ringStart
             let as = unsafeForeignPtrToPtr aStart
-            assert (aBound `minusPtr` as >= ringBound `minusPtr` rs)
+            assert (aEnd `minusPtr` as >= ringBound `minusPtr` rs)
                    (return ())
             let len = ringBound `minusPtr` rh
             r1 <- A.memcmp (castPtr rh) (castPtr as) len
