@@ -177,6 +177,24 @@ spliceArraysLenUnsafe len buffered = do
                         A.memcpy (castPtr dst) (castPtr src) count
                         return $ dst `plusPtr` count
 
+{-# INLINE _spliceArrays #-}
+_spliceArrays :: (MonadIO m, Storable a)
+    => SerialT m (Array a) -> m (Array a)
+_spliceArrays s = do
+    buffered <- P.foldr S.cons S.nil s
+    len <- S.sum (S.map length buffered)
+    arr <- liftIO $ MA.newArray len
+    end <- S.foldlM' writeArr (MA.aEnd arr) s
+    return $ A.unsafeFreeze $ arr {MA.aEnd = end}
+
+    where
+
+    writeArr dst (Array as ae) =
+        liftIO $ withForeignPtr as $ \src -> do
+                        let count = ae `minusPtr` src
+                        A.memcpy (castPtr dst) (castPtr src) count
+                        return $ dst `plusPtr` count
+
 {-# INLINE _spliceArraysBuffered #-}
 _spliceArraysBuffered :: (MonadIO m, Storable a)
     => SerialT m (Array a) -> m (Array a)
