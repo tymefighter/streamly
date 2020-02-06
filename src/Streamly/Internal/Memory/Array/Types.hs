@@ -21,7 +21,10 @@
 module Streamly.Internal.Memory.Array.Types
     (
       Array (..)
+
+    -- * Freezing and Thrawing
     , unsafeFreeze
+    , unsafeFreezeWithShrink
     , unsafeThraw
 
     -- * Construction
@@ -196,10 +199,31 @@ data Array a =
     , aEnd   :: {-# UNPACK #-} !(Ptr a)        -- first unused address
     }
 
--- XXX Use shrink to fit?
+-------------------------------------------------------------------------------
+-- Freezing and Thrawing
+-------------------------------------------------------------------------------
+
+-- | Returns an immutable array using the same underlying pointers of the
+-- mutable array. If the underlying array is mutated, the immutable promise is
+-- lost. Please make sure that the mutable array is never used after freezing it
+-- using /unsafeFreeze/.
+{-# INLINE unsafeFreeze #-}
 unsafeFreeze :: MA.Array a -> Array a
 unsafeFreeze (MA.Array as ae _) = Array as ae
 
+-- | Similar to 'unsafeFreeze' but uses 'MA.shrinkToFit' on the mutable array
+-- first.
+{-# INLINE unsafeFreezeWithShrink #-}
+unsafeFreezeWithShrink :: Storable a => MA.Array a -> Array a
+unsafeFreezeWithShrink arr = unsafePerformIO $ do
+  MA.Array as ae _ <- MA.shrinkToFit arr
+  return $ Array as ae
+
+-- | Returns a mutable array using the same underlying pointers of the immutable
+-- array. If the resulting array is mutated, the older immutable array is
+-- mutated as well. Please make sure that the immutable array is never used
+-- after thrawing it using /unsafeThraw/.
+{-# INLINE unsafeThraw #-}
 unsafeThraw :: Array a -> MA.Array a
 unsafeThraw (Array as ae) = MA.Array as ae ae
 
