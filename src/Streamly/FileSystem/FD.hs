@@ -224,12 +224,10 @@ readArrayUpto size (Handle fd) = do
     withForeignPtr ptr $ \p -> do
         -- n <- hGetBufSome h p size
         n <- RawIO.read fd p size
-        let v = unsafeFreeze
-                $ mutableArray ptr (p `plusPtr` n) (p `plusPtr` size)
-
         -- XXX shrink only if the diff is significant
-        -- A.shrinkToFit v
-        return v
+        -- Use unsafeFreezeWithShrink
+        return $
+            unsafeFreeze $ mutableArray ptr (p `plusPtr` n) (p `plusPtr` size)
 
 -------------------------------------------------------------------------------
 -- Array IO (output)
