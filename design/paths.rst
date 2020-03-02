@@ -29,9 +29,9 @@ created in the file system by the user or by programs storing their data
 on the file system. When a directory or file is created, or when a directory is
 listed, the following operations are performed:
 
-1) for lookups an existing directory name must be resolved based on the name
-  supplied by the user.
-2) for creation the file name to be created is supplied by the user
+1. for lookups an existing directory name must be resolved based on the name
+   supplied by the user.
+2. for creation the file name to be created is supplied by the user
 
 When the user asks the file system to lookup or create a file or
 directory in the file system:
@@ -40,10 +40,11 @@ directory in the file system:
    whatsoever, to the file system. or does it? Windows?
 2) The file system may translate the name to its own conventions before a
    lookup or create, e.g. it may
-    a) change the name to upper case
-    b) translate the name to 8.3 chars
-    c) change the character encoding?
-    d) change the unicode normalization form of the name (Apple)
+
+   * change the name to upper case
+   * translate the name to 8.3 chars
+   * change the character encoding?
+   * change the unicode normalization form of the name (Apple)
 
 When resolving an existing directory name in the file system we need
 to supply a path which consists of component names separated by a separator
@@ -54,14 +55,15 @@ user input, device input or by the program which previously got the path
 entries by traversing the file system itself.
 
 1) When the path is acquired by a user input,  the user input could be:
-  a) a literal string in the program
-  b) a path entered via an input device
-  c) a path coming from the network
+
+   a) a literal string in the program
+   b) a path entered via an input device
+   c) a path coming from the network
 
 2) If the path was previously acquired from the file system then the
-  best thing to do is to never change anything in the path and store it
-  as it is and supply exactly the same path when needed. That way we can
-  guarantee that the path remains exactly what it was in the file system.
+   best thing to do is to never change anything in the path and store it
+   as it is and supply exactly the same path when needed. That way we can
+   guarantee that the path remains exactly what it was in the file system.
 
 Handling String Literals
 ========================
@@ -72,14 +74,14 @@ by the GHC parser and then stored in the generated binaries as null
 terminated C string literals encoded in UTF-8 (see GHC reference). There are
 several possible points of failure here:
 
-    a) GHC parser needs to interpret the source code encoding correctly.
-    b) We assume that the editor does not perform any translation on the
-      literal as entered by the user e.g. it does not perform unicode
-      normalization on it. If it does then the string as entered by the user
-      won't remain the same when it reaches the file system.
-    c) GHC parser stores the parsed string literal in UTF-8 encoding. We
-      assume that GHC does not perform any unicode normalization or any
-      other translation on the string.
+a) GHC parser needs to interpret the source code encoding correctly.
+b) We assume that the editor does not perform any translation on the
+   literal as entered by the user e.g. it does not perform unicode
+   normalization on it. If it does then the string as entered by the user
+   won't remain the same when it reaches the file system.
+c) GHC parser stores the parsed string literal in UTF-8 encoding. We
+   assume that GHC does not perform any unicode normalization or any
+   other translation on the string.
 
 The UTF-8 encoded string literal can be passed as a blob of bytes to the file
 system or it can be converted to String type and re-encoded as UTF-8 both
@@ -141,24 +143,32 @@ and may not find it.
 Type Safety Requirements
 ------------------------
 
-* Safety against using an absolute path where a relative path is to be used and
-  vice-versa. In don't care situations we should be easily able to use any type
-  conveniently. Validations for absolute or relative path when constructing a
-  path.
+* Safety against using an absolute path where a relative path is to be
+  used and vice-versa.  
+  
+  * Validations for absolute or relative path when constructing a path.
+  * We cannot append an absolute path to another path
 * Safety against using a file name where a directory name is to be used and
   vice-versa.
-    * In don't care situations we should be easily able to use any type conveniently. 
-    * Certain validations can be performed e.g. file names cannot be "." or "..".
-    * We should not be appending more directory components to a file path
+
+  * Certain validations can be performed e.g. file names cannot be "." or "..".
+  * We should not be appending more directory components to a file path
+
+In don't care situations we should be easily able to use any type
+conveniently or cast a type into another.  It is desirable that the
+programmer can choose the safety level. For example, we should be able
+to instantiate a path type where we only worry about the distinction
+between Absolute and Relative paths but no distinction between files and
+directories or vice versa.
 
 Requirement Summary
 -------------------
 
 * minimal dependencies, specifically streamly does not depend on bytestring
 * round-tripping safety wrt to file system returned paths
-* type safety
+* type safety for different path types
 * support Posix/Windows
-* URI paths and other ways to represent paths where the separator could
+* support URI paths and other ways to represent paths where the separator could
   be different.
 
 Design Considerations
