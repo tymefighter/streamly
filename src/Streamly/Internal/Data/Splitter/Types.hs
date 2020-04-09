@@ -75,20 +75,24 @@ instance Monad m => Applicative (Splitter m a) where
         done (Tuple' xL xR) = doneWS doneL xL <*> doneWS doneR xR
      in Splitter step begin done
 
+data SplitSeqState sb b sc
+    = LeftSplitter sb
+    | RightSplitter b sc
+
 {-# INLINE split #-}
 split :: Monad m => (b -> c -> d) -> Splitter m a b -> Splitter m a c -> Splitter m a d
 split f (Splitter step1 initial1 done1) (Splitter step2 initial2 done2) =
-  Splitter step initial done
+    Splitter step initial done
   where
-    initial = Left <$> initial1
-    step (Left s0) a = do
-      s1 <- step1 s0 a
-      case s1 of
-        Yield s2 -> return $ Yield $ Left s2
-        Stop s2 -> do
-          x <- done1 s2
-          y <- initial2
-          return $ Yield $ Right $ Tuple' x y
-    step (Right (Tuple' b s)) a = mapStep (Right . Tuple' b) <$> step2 s a
-    done (Left sb) = f <$> (done1 sb) <*> (initial2 >>= done2)
-    done (Right (Tuple' b sc)) = f b <$> done2 sc
+    initial = LeftSplitter <$> initial1
+    step (LeftSplitter s0) a = do
+        s1 <- step1 s0 a
+        case s1 of
+            Yield s2 -> return $ Yield $ LeftSplitter s2
+            Stop s2 -> do
+                x <- done1 s2
+                y <- initial2
+                return $ Yield $ RightSplitter x y
+    step (RightSplitter b s) a = mapStep (RightSplitter b) <$> step2 s a
+    done (LeftSplitter sb) = f <$> (done1 sb) <*> (initial2 >>= done2)
+    done (RightSplitter b sc) = f b <$> done2 sc
