@@ -92,6 +92,7 @@ module Streamly.Internal.Prelude
 
     -- ** Composable Left Folds
     , fold
+    , P.runSplitter
 
     -- ** Concurrent Folds
     , foldAsync

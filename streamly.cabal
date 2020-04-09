@@ -322,6 +322,8 @@ library
                      , Streamly.Internal.Memory.ArrayStream
                      , Streamly.Internal.Data.Fold.Types
                      , Streamly.Internal.Data.Fold
+                     , Streamly.Internal.Data.Splitter.Types
+                     , Streamly.Internal.Data.Splitter
                      , Streamly.Internal.Data.Sink.Types
                      , Streamly.Internal.Data.Sink
 

@@ -38,6 +38,8 @@ module Streamly.Internal.Data.Stream.Prelude
     , foldlMx'
     , foldl'
     , runFold
+    , splitlMx'
+    , runSplitter
 
     -- Lazy left folds are useful only for reversing the stream
     , foldlS
@@ -72,6 +74,8 @@ import Prelude hiding (foldr, minimum, maximum)
 import qualified Prelude
 
 import Streamly.Internal.Data.Fold.Types (Fold (..))
+
+import qualified Streamly.Internal.Data.Splitter.Types as SP
 
 #ifdef USE_STREAMK_ONLY
 import qualified Streamly.Internal.Data.Stream.StreamK as S
@@ -193,6 +197,15 @@ foldlT f z s = S.foldlT f z (toStreamS s)
 {-# INLINE runFold #-}
 runFold :: (Monad m, IsStream t) => Fold m a b -> t m a -> m b
 runFold (Fold step begin done) = foldlMx' step begin done
+
+{-# INLINE splitlMx' #-}
+splitlMx' :: (IsStream t, Monad m)
+    => (x -> a -> m (SP.Step x)) -> m x -> (x -> m b) -> t m a -> m b
+splitlMx' step begin done m = S.splitlMx' step begin done $ toStreamS m
+
+{-# INLINE runSplitter #-}
+runSplitter :: (IsStream t, Monad m) => SP.Splitter m a b -> t m a -> m b
+runSplitter (SP.Splitter step begin done) = splitlMx' step begin done
 
 ------------------------------------------------------------------------------
 -- Scans

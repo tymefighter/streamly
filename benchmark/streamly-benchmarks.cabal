@@ -236,6 +236,18 @@ benchmark fold
   else
     buildable: True
 
+benchmark splitter
+  import: bench-options
+  type: exitcode-stdio-1.0
+  ghc-options: -rtsopts
+  hs-source-dirs: ., Streamly/Benchmark/Data
+  main-is: Splitter.hs
+  if impl(ghcjs)
+    buildable: False
+  else
+    buildable: True
+
+
 -------------------------------------------------------------------------------
 -- Raw Streams
 -------------------------------------------------------------------------------

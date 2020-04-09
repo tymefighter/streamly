@@ -127,6 +127,8 @@ module Streamly.Internal.Data.Stream.StreamD
     , foldlx'
     , foldlMx'
     , runFold
+    , splitlMx'
+    , runSplitter
 
     -- ** Specialized Folds
     , tap
@@ -369,6 +371,7 @@ import Streamly.Internal.Data.Stream.StreamD.Type
 import Streamly.Internal.Data.SVar
 import Streamly.Internal.Data.Stream.SVar (fromConsumer, pushToFold)
 
+import qualified Streamly.Internal.Data.Splitter.Types as SP
 import qualified Streamly.Internal.Data.Pipe.Types as Pipe
 import qualified Streamly.Internal.Memory.Array.Types as A
 import qualified Streamly.Internal.Data.Fold as FL
@@ -3960,6 +3963,27 @@ the (Stream step state) = go state
 {-# INLINE runFold #-}
 runFold :: (Monad m) => Fold m a b -> Stream m a -> m b
 runFold (Fold step begin done) = foldlMx' step begin done
+
+{-# INLINE_NORMAL splitlMx' #-}
+splitlMx' :: Monad m => (x -> a -> m (SP.Step x)) -> m x -> (x -> m b) -> Stream m a -> m b
+splitlMx' fstep begin done (Stream step state) =
+    begin >>= \x -> go SPEC x state
+  where
+    {-# INLINE_LATE go #-}
+    go !_ acc st = acc `seq` do
+        r <- step defState st
+        case r of
+            Yield x s -> do
+                acc0 <- fstep acc x
+                case acc0 of
+                    SP.Yield acc1 -> go SPEC acc1 s
+                    SP.Stop acc1 -> done acc1
+            Skip s -> go SPEC acc s
+            Stop   -> done acc
+
+{-# INLINE runSplitter #-}
+runSplitter :: (Monad m) => SP.Splitter m a b -> Stream m a -> m b
+runSplitter (SP.Splitter step begin done) = splitlMx' step begin done
 
 -------------------------------------------------------------------------------
 -- Concurrent application and fold
