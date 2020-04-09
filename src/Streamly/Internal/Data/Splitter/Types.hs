@@ -23,12 +23,12 @@ module Streamly.Internal.Data.Splitter.Types
 import Streamly.Internal.Data.Strict (Tuple'(..))
 
 data Step s
-  = Yield s
-  | Stop s
+    = Yield s
+    | Stop s
 
 data Splitter m a b =
-  -- | @Splitter @ @ step @ @ initial @ @ done@
-  forall s. Splitter (s -> a -> m (Step s)) (m s) (s -> m b)
+    -- | @Splitter @ @ step @ @ initial @ @ done@
+    forall s. Splitter (s -> a -> m (Step s)) (m s) (s -> m b)
 
 {-# INLINE stepWS #-}
 stepWS :: Monad m => (s -> a -> m (Step s)) -> Step s -> a -> m (Step s)
@@ -59,21 +59,21 @@ combineStep2 f sa@(Stop _) sb@(Stop _) = Stop (f sa sb)
 combineStep2 f sa sb = Yield (f sa sb)
 
 instance Monad m => Functor (Splitter m a) where
-  {-# INLINE fmap #-}
-  fmap f (Splitter step start done) = Splitter step start done'
-    where
-      done' x = fmap f $! done x
+    {-# INLINE fmap #-}
+    fmap f (Splitter step start done) = Splitter step start done'
+      where
+        done' x = fmap f $! done x
 
 instance Monad m => Applicative (Splitter m a) where
-  {-# INLINE pure #-}
-  pure b = Splitter (\() _ -> pure $ Stop ()) (pure ()) (\() -> pure b)
-  {-# INLINE (<*>) #-}
-  (Splitter stepL beginL doneL) <*> (Splitter stepR beginR doneR) =
-    let step (Tuple' xL xR) a =
-          combineStep2 Tuple' <$> stepWS stepL xL a <*> stepWS stepR xR a
-        begin = Tuple' <$> initialTSM beginL <*> initialTSM beginR
-        done (Tuple' xL xR) = doneWS doneL xL <*> doneWS doneR xR
-     in Splitter step begin done
+    {-# INLINE pure #-}
+    pure b = Splitter (\() _ -> pure $ Stop ()) (pure ()) (\() -> pure b)
+    {-# INLINE (<*>) #-}
+    (Splitter stepL beginL doneL) <*> (Splitter stepR beginR doneR) =
+        let step (Tuple' xL xR) a =
+                combineStep2 Tuple' <$> stepWS stepL xL a <*> stepWS stepR xR a
+            begin = Tuple' <$> initialTSM beginL <*> initialTSM beginR
+            done (Tuple' xL xR) = doneWS doneL xL <*> doneWS doneR xR
+         in Splitter step begin done
 
 data SplitSeqState sb b sc
     = LeftSplitter sb
