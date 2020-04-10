@@ -3965,7 +3965,7 @@ runFold :: (Monad m) => Fold m a b -> Stream m a -> m b
 runFold (Fold step begin done) = foldlMx' step begin done
 
 {-# INLINE_NORMAL splitlMx' #-}
-splitlMx' :: Monad m => (x -> a -> m (SP.Step x)) -> m x -> (x -> m b) -> Stream m a -> m b
+splitlMx' :: Monad m => (x -> a -> m (SP.Step x b)) -> m x -> (x -> m b) -> Stream m a -> m b
 splitlMx' fstep begin done (Stream step state) =
     begin >>= \x -> go SPEC x state
   where
@@ -3977,7 +3977,7 @@ splitlMx' fstep begin done (Stream step state) =
                 acc0 <- fstep acc x
                 case acc0 of
                     SP.Yield acc1 -> go SPEC acc1 s
-                    SP.Stop acc1 -> done acc1
+                    SP.Stop res -> return res
             Skip s -> go SPEC acc s
             Stop   -> done acc
 

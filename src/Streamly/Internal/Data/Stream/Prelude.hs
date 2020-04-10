@@ -200,7 +200,7 @@ runFold (Fold step begin done) = foldlMx' step begin done
 
 {-# INLINE splitlMx' #-}
 splitlMx' :: (IsStream t, Monad m)
-    => (x -> a -> m (SP.Step x)) -> m x -> (x -> m b) -> t m a -> m b
+    => (x -> a -> m (SP.Step x b)) -> m x -> (x -> m b) -> t m a -> m b
 splitlMx' step begin done m = S.splitlMx' step begin done $ toStreamS m
 
 {-# INLINE runSplitter #-}
