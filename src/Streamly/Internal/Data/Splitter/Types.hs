@@ -15,7 +15,9 @@ module Streamly.Internal.Data.Splitter.Types
     , doneWS
     , initialTS
     , initialTSM
+    , mkNTSplitter
     , split
+    , ltake
     )where
 
 import Streamly.Internal.Data.Strict (Tuple'(..))
@@ -45,6 +47,12 @@ initialTS = Yield
 {-# INLINE initialTSM #-}
 initialTSM :: Monad m => m s -> m (Step s b)
 initialTSM = fmap Yield
+
+{-# INLINE mkNTSplitter #-}
+mkNTSplitter :: Monad m => (s -> a -> m s) -> (m s) -> (s -> m b) -> Splitter m a b
+mkNTSplitter step initial done = Splitter step' initial done
+  where
+    step' s a = Yield <$> step s a
 
 instance Monad m => Functor (Splitter m a) where
     {-# INLINE fmap #-}
@@ -94,3 +102,18 @@ split f (Splitter step1 initial1 done1) (Splitter step2 initial2 done2) =
             Stop c -> return $ Stop $ f b c
     done (LeftSplitter sb) = f <$> (done1 sb) <*> (initial2 >>= done2)
     done (RightSplitter b sc) = f b <$> done2 sc
+
+{-# INLINABLE ltake #-}
+ltake :: Monad m => Int -> Splitter m a b -> Splitter m a b
+ltake n (Splitter step initial done) = Splitter step' initial' done'
+  where
+    initial' = fmap (Tuple' 0) initial
+    step' (Tuple' i r) a = do
+        if i < n
+            then do
+                res <- step r a
+                case res of
+                    Yield s -> return $ Yield $ Tuple' (i + 1) s
+                    Stop b -> return $ Stop b
+            else Stop <$> done r
+    done' (Tuple' _ r) = done r
