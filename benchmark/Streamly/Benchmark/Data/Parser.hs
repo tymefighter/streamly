@@ -18,7 +18,7 @@ import Control.Monad.Catch (MonadCatch, MonadThrow)
 import System.Random (randomRIO)
 import Prelude hiding (any, all, take, sequence, sequenceA)
 
-import qualified Data.Traversable as TR
+-- import qualified Data.Traversable as TR
 import qualified Control.Applicative as AP
 import qualified Streamly as S hiding (runStream)
 import qualified Streamly.Prelude  as S
