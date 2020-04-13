@@ -73,6 +73,7 @@ module Streamly.Data.Fold
     -- ** Full Folds
     , drain
     , drainBy
+{-
     , last
     , length
     , sum
@@ -115,8 +116,10 @@ module Streamly.Data.Fold
     , elem
     , notElem
     -- XXX these are slower than right folds even when full input is used
+-}
     , all
     , any
+{-
     , and
     , or
 
@@ -256,6 +259,7 @@ module Streamly.Data.Fold
     -- , concatMap
     -- , chunksOf
     -- , duplicate  -- experimental
+-}
     )
 where
 

@@ -13,21 +13,27 @@
 
 module Streamly.Internal.Data.Fold.Types
     ( Fold (..)
+{-
     , Fold2 (..)
     , simplify
     , toListRevF  -- experimental
+-}
     , lmap
     , lmapM
+{-
     , lfilter
     , lfilterM
     , lcatMaybes
     , ltake
     , ltakeWhile
     , lsessionsOf
+-}
     , lchunksOf
+{-
     , lchunksOf2
 
     , duplicate
+-}
     , initialize
     , runStep
     )
@@ -65,7 +71,7 @@ import Streamly.Internal.Data.SVar (MonadAsync)
 data Fold m a b =
   -- | @Fold @ @ step @ @ initial @ @ extract@
   forall s. Fold (s -> a -> m s) (m s) (s -> m b)
-
+{-
 -- Experimental type to provide a side input to the fold for generating the
 -- initial state. For example, if we have to fold chunks of a stream and write
 -- each chunk to a different file, then we can generate the file name using a
@@ -222,7 +228,7 @@ instance (Monad m, Floating b) => Floating (Fold m a b) where
 {-# INLINABLE toListRevF #-}
 toListRevF :: Monad m => Fold m a [a]
 toListRevF = Fold (\xs x -> return $ x:xs) (return []) return
-
+-}
 -- | @(lmap f fold)@ maps the function @f@ on the input of the fold.
 --
 -- >>> S.fold (FL.lmap (\x -> x * x) FL.sum) (S.enumerateFromTo 1 100)
@@ -243,7 +249,7 @@ lmapM :: Monad m => (a -> m b) -> Fold m b r -> Fold m a r
 lmapM f (Fold step begin done) = Fold step' begin done
   where
     step' x a = f a >>= step x
-
+{-
 ------------------------------------------------------------------------------
 -- Filtering
 ------------------------------------------------------------------------------
@@ -335,7 +341,7 @@ ltakeWhile predicate (Fold step initial done) = Fold step' initial' done'
 duplicate :: Applicative m => Fold m a b -> Fold m a (Fold m a b)
 duplicate (Fold step begin done) =
     Fold step begin (\x -> pure (Fold step (pure x) done))
-
+-}
 -- | Run the initialization effect of a fold. The returned fold would use the
 -- value returned by this effect as its initial value.
 --
@@ -388,7 +394,7 @@ lchunksOf n (Fold step1 initial1 extract1) (Fold step2 initial2 extract2) =
         res <- extract1 r1
         acc2 <- step2 r2 res
         extract2 acc2
-
+{-
 {-# INLINE lchunksOf2 #-}
 lchunksOf2 :: Monad m => Int -> Fold m a b -> Fold2 m x b c -> Fold2 m x a c
 lchunksOf2 n (Fold step1 initial1 extract1) (Fold2 step2 inject2 extract2) =
@@ -480,3 +486,4 @@ lsessionsOf n (Fold step1 initial1 extract1) (Fold step2 initial2 extract2) =
                     Left _ -> r2
                     Right _ -> Left e
         putMVar mv2 r
+-}

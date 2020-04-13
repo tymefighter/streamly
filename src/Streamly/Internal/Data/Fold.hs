@@ -24,7 +24,7 @@ module Streamly.Internal.Data.Fold
     (
     -- * Fold Type
       Fold (..)
-
+{-
     , hoist
     , generally
 
@@ -36,10 +36,11 @@ module Streamly.Internal.Data.Fold
     , mkPureId
     , mkFold
     , mkFoldId
-
+-}
     -- ** Full Folds
     , drain
     , drainBy
+{-
     , drainBy2
     , last
     , length
@@ -85,8 +86,10 @@ module Streamly.Internal.Data.Fold
     , elem
     , notElem
     -- XXX these are slower than right folds even when full input is used
+-}
     , all
     , any
+{-
     , and
     , or
 
@@ -201,7 +204,7 @@ module Streamly.Internal.Data.Fold
     -- * Running Folds
     , initialize
     , runStep
-
+-}
     -- * Folding to SVar
     , toParallelSVar
     , toParallelSVarLimited
@@ -231,7 +234,7 @@ import Streamly.Internal.Data.Strict
 import Streamly.Internal.Data.SVar
 
 import qualified Streamly.Internal.Data.Pipe.Types as Pipe
-
+{-
 ------------------------------------------------------------------------------
 -- Smart constructors
 ------------------------------------------------------------------------------
@@ -378,7 +381,7 @@ _Fold1 step = Fold step_ (return Nothing') (return . toMaybe)
 ------------------------------------------------------------------------------
 -- Left folds
 ------------------------------------------------------------------------------
-
+-}
 ------------------------------------------------------------------------------
 -- Run Effects
 ------------------------------------------------------------------------------
@@ -405,7 +408,7 @@ drain = Fold step begin done
 {-# INLINABLE drainBy #-}
 drainBy ::  Monad m => (a -> m b) -> Fold m a ()
 drainBy f = Fold (const (void . f)) (return ()) return
-
+{-
 {-# INLINABLE drainBy2 #-}
 drainBy2 ::  Monad m => (a -> m b) -> Fold2 m c a ()
 drainBy2 f = Fold2 (const (void . f)) (\_ -> return ()) return
@@ -770,7 +773,7 @@ elemIndex a = findIndex (a ==)
 {-# INLINABLE null #-}
 null :: Monad m => Fold m a Bool
 null = Fold (\_ _ -> return False) (return True) return
-
+-}
 -- |
 -- > any p = lmap p or
 --
@@ -780,14 +783,14 @@ null = Fold (\_ _ -> return False) (return True) return
 {-# INLINABLE any #-}
 any :: Monad m => (a -> Bool) -> Fold m a Bool
 any predicate = Fold (\x a -> return $ x || predicate a) (return False) return
-
+{-
 -- | Return 'True' if the given element is present in the stream.
 --
 -- @since 0.7.0
 {-# INLINABLE elem #-}
 elem :: (Eq a, Monad m) => a -> Fold m a Bool
 elem a = any (a ==)
-
+-}
 -- |
 -- > all p = lmap p and
 --
@@ -797,7 +800,7 @@ elem a = any (a ==)
 {-# INLINABLE all #-}
 all :: Monad m => (a -> Bool) -> Fold m a Bool
 all predicate = Fold (\x a -> return $ x && predicate a) (return True) return
-
+{-
 -- | Returns 'True' if the given element is not present in the stream.
 --
 -- @since 0.7.0
@@ -1548,7 +1551,7 @@ lchunksInRange low high (Fold step1 initial1 extract1)
 ------------------------------------------------------------------------------
 -- Fold to a Parallel SVar
 ------------------------------------------------------------------------------
-
+-}
 {-# INLINE toParallelSVar #-}
 toParallelSVar :: MonadIO m => SVar t m a -> Maybe WorkerInfo -> Fold m a ()
 toParallelSVar svar winfo = Fold step initial extract

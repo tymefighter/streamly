@@ -387,7 +387,7 @@ module Streamly.Prelude
     -- -- ** Breaking
 
     , chunksOf
-    , intervalsOf
+--    , intervalsOf
 
     -- ** Searching
     -- | Finding the presence or location of an element, a sequence of elements

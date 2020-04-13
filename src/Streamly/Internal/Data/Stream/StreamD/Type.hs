@@ -62,7 +62,7 @@ module Streamly.Internal.Data.Stream.StreamD.Type
     , take
     , GroupState (..) -- for inspection testing
     , groupsOf
-    , groupsOf2
+--    , groupsOf2
     )
 where
 
@@ -77,7 +77,8 @@ import Prelude hiding (map, mapM, foldr, take, concatMap)
 import Fusion.Plugin.Types (Fuse(..))
 
 import Streamly.Internal.Data.SVar (State(..), adaptState, defState)
-import Streamly.Internal.Data.Fold.Types (Fold(..), Fold2(..))
+-- import Streamly.Internal.Data.Fold.Types (Fold(..), Fold2(..))
+import Streamly.Internal.Data.Fold.Types (Fold(..))
 
 import qualified Streamly.Internal.Data.Stream.StreamK as K
 
@@ -601,7 +602,7 @@ groupsOf n (Fold fstep initial extract) (Stream step state) =
         return $ Yield r next
 
     step' _ GroupFinish = return Stop
-
+{-
 {-# INLINE_NORMAL groupsOf2 #-}
 groupsOf2
     :: Monad m
@@ -645,3 +646,4 @@ groupsOf2 n input (Fold2 fstep inject extract) (Stream step state) =
         return $ Yield r next
 
     step' _ GroupFinish = return Stop
+-}

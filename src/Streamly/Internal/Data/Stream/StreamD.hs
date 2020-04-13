@@ -181,7 +181,7 @@ module Streamly.Internal.Data.Stream.StreamD
 
     -- ** Grouping
     , groupsOf
-    , groupsOf2
+--    , groupsOf2
     , groupsBy
     , groupsRollingBy
 
@@ -317,7 +317,7 @@ module Streamly.Internal.Data.Stream.StreamD
     , mkParallelD
     , newCallbackStream
 
-    , lastN
+--    , lastN
     )
 where
 
@@ -4340,7 +4340,7 @@ tapAsync f (Stream step1 state1) = Stream step TapInit
             Yield a s -> Yield a (TapDone s)
             Skip s    -> Skip (TapDone s)
             Stop      -> Stop
-
+{-
 -- XXX Exported from Array again as this fold is specific to Array
 -- | Take last 'n' elements from the stream and discard the rest.
 {-# INLINE lastN #-}
@@ -4360,7 +4360,7 @@ lastN n
     foldFunc i
         | i < n = RB.unsafeFoldRingM
         | otherwise = RB.unsafeFoldRingFullM
-
+-}
 ------------------------------------------------------------------------------
 -- Time related
 ------------------------------------------------------------------------------
