@@ -118,6 +118,9 @@ module Streamly.Internal.Data.Parser.ParserD
     -- secondary parser.
     , deintercalate
 
+    -- ** Sequential Alternative
+    , alt
+
     -- ** Parallel Alternatives
     , shortest
     , longest
@@ -126,6 +129,7 @@ module Streamly.Internal.Data.Parser.ParserD
     -- * N-ary Combinators
     -- ** Sequential Collection
     , sequence
+    , concatMap
 
     -- ** Sequential Repetition
     , count
@@ -184,7 +188,7 @@ where
 import Control.Exception (assert)
 import Control.Monad.Catch (MonadCatch, MonadThrow(..))
 import Prelude
-       hiding (any, all, take, takeWhile, sequence)
+       hiding (any, all, take, takeWhile, sequence, concatMap)
 
 import Streamly.Internal.Data.Fold.Types (Fold(..))
 

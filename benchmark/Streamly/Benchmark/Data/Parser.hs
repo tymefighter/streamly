@@ -14,7 +14,7 @@ module Main
   ) where
 
 import Control.DeepSeq (NFData(..))
-import Control.Monad.Catch (MonadCatch, MonadThrow)
+import Control.Monad.Catch (MonadCatch)
 import Data.Foldable (asum)
 import System.Random (randomRIO)
 import Prelude hiding (any, all, take, sequence, sequenceA, takeWhile)
@@ -65,73 +65,78 @@ benchIOSink value name f =
 any :: (MonadCatch m, Ord a) => a -> SerialT m a -> m Bool
 any value = IP.parse (PR.any (> value))
 
-{-
 {-# INLINE all #-}
-all :: (MonadThrow m, Ord a) => a -> SerialT m a -> m Bool
-all value = IP.parseD (PR.all (<= value))
+all :: (MonadCatch m, Ord a) => a -> SerialT m a -> m Bool
+all value = IP.parse (PR.all (<= value))
 
 {-# INLINE take #-}
-take :: MonadThrow m => Int -> SerialT m a -> m ()
-take value = IP.parseD (PR.take value FL.drain)
+take :: MonadCatch m => Int -> SerialT m a -> m ()
+take value = IP.parse (PR.take value FL.drain)
 
 {-# INLINE takeWhile #-}
-takeWhile :: MonadThrow m => Int -> SerialT m Int -> m ()
-takeWhile value = IP.parseD (PR.takeWhile (<= value) FL.drain)
+takeWhile :: MonadCatch m => Int -> SerialT m Int -> m ()
+takeWhile value = IP.parse (PR.takeWhile (<= value) FL.drain)
 
 {-# INLINE many #-}
 many :: MonadCatch m => SerialT m Int -> m Int
-many = IP.parseD (PR.many FL.length (PR.satisfy (> 0)))
+many = IP.parse (PR.many FL.length (PR.satisfy (> 0)))
 
 {-# INLINE manyAlt #-}
 manyAlt :: MonadCatch m => SerialT m Int -> m Int
 manyAlt xs = do
-    x <- IP.parseD (AP.many (PR.satisfy (> 0))) xs
+    x <- IP.parse (AP.many (PR.satisfy (> 0))) xs
     return $ Prelude.length x
 
 {-# INLINE some #-}
 some :: MonadCatch m => SerialT m Int -> m Int
-some = IP.parseD (PR.some FL.length (PR.satisfy (> 0)))
+some = IP.parse (PR.some FL.length (PR.satisfy (> 0)))
 
 {-# INLINE someAlt #-}
 someAlt :: MonadCatch m => SerialT m Int -> m Int
 someAlt xs = do
-    x <- IP.parseD (AP.some (PR.satisfy (> 0))) xs
+    x <- IP.parse (AP.some (PR.satisfy (> 0))) xs
     return $ Prelude.length x
 
 {-# INLINE manyTill #-}
 manyTill :: MonadCatch m => Int -> SerialT m Int -> m Int
 manyTill value =
-    IP.parseD (PR.manyTill FL.length (PR.satisfy (> 0)) (PR.satisfy (== value)))
+    IP.parse (PR.manyTill FL.length (PR.satisfy (> 0)) (PR.satisfy (== value)))
 
 {-# INLINE splitAllAny #-}
-splitAllAny :: MonadThrow m
+splitAllAny :: MonadCatch m
     => Int -> SerialT m Int -> m (Bool, Bool)
 splitAllAny value =
-    IP.parseD ((,) <$> PR.all (<= (value `div` 2)) <*> PR.any (> value))
+    IP.parse ((,) <$> PR.all (<= (value `div` 2)) <*> PR.any (> value))
+
+{-# INLINE splitWithAllAny #-}
+splitWithAllAny :: MonadCatch m
+    => Int -> SerialT m Int -> m (Bool, Bool)
+splitWithAllAny value =
+    IP.parse (PR.splitWith (,) (PR.all (<= (value `div` 2))) (PR.any (> value)))
 
 {-# INLINE teeAllAny #-}
-teeAllAny :: (MonadThrow m, Ord a)
+teeAllAny :: (MonadCatch m, Ord a)
     => a -> SerialT m a -> m (Bool, Bool)
 teeAllAny value =
-    IP.parseD (PR.teeWith (,) (PR.all (<= value)) (PR.any (> value)))
+    IP.parse (PR.teeWith (,) (PR.all (<= value)) (PR.any (> value)))
 
 {-# INLINE teeFstAllAny #-}
-teeFstAllAny :: (MonadThrow m, Ord a)
+teeFstAllAny :: (MonadCatch m, Ord a)
     => a -> SerialT m a -> m (Bool, Bool)
 teeFstAllAny value =
-    IP.parseD (PR.teeWithFst (,) (PR.all (<= value)) (PR.any (> value)))
+    IP.parse (PR.teeWithFst (,) (PR.all (<= value)) (PR.any (> value)))
 
 {-# INLINE shortestAllAny #-}
-shortestAllAny :: (MonadThrow m, Ord a)
+shortestAllAny :: (MonadCatch m, Ord a)
     => a -> SerialT m a -> m Bool
 shortestAllAny value =
-    IP.parseD (PR.shortest (PR.all (<= value)) (PR.any (> value)))
+    IP.parse (PR.shortest (PR.all (<= value)) (PR.any (> value)))
 
 {-# INLINE longestAllAny #-}
 longestAllAny :: (MonadCatch m, Ord a)
     => a -> SerialT m a -> m Bool
 longestAllAny value =
-    IP.parseD (PR.longest (PR.all (<= value)) (PR.any (> value)))
+    IP.parse (PR.longest (PR.all (<= value)) (PR.any (> value)))
 
 -------------------------------------------------------------------------------
 -- Parsers in which -fspec-constr-recursive=16 is problematic
@@ -142,22 +147,22 @@ longestAllAny value =
 -- not have to rely on it.
 --
 {-# INLINE lookAhead #-}
-lookAhead :: MonadThrow m => Int -> SerialT m Int -> m ()
+lookAhead :: MonadCatch m => Int -> SerialT m Int -> m ()
 lookAhead value =
-    IP.parseD (PR.lookAhead (PR.takeWhile (<= value) FL.drain) *> pure ())
+    IP.parse (PR.lookAhead (PR.takeWhile (<= value) FL.drain) *> pure ())
 
 -- quadratic complexity
 {-# INLINE sequenceA #-}
-sequenceA :: MonadThrow m => Int -> SerialT m Int -> m Int
+sequenceA :: MonadCatch m => Int -> SerialT m Int -> m Int
 sequenceA value xs = do
-    x <- IP.parseD (TR.sequenceA (replicate value (PR.satisfy (> 0)))) xs
+    x <- IP.parse (TR.sequenceA (replicate value (PR.satisfy (> 0)))) xs
     return $ length x
 
 -- quadratic complexity
 {-# INLINE sequence #-}
-sequence :: MonadThrow m => Int -> SerialT m Int -> m Int
+sequence :: MonadCatch m => Int -> SerialT m Int -> m Int
 sequence value xs = do
-    x <- IP.parseD (TR.sequence (replicate value (PR.satisfy (> 0)))) xs
+    x <- IP.parse (TR.sequence (replicate value (PR.satisfy (> 0)))) xs
     return $ length x
 
 -- choice using the "Alternative" instance with direct style parser type has
@@ -166,9 +171,8 @@ sequence value xs = do
 {-# INLINE choice #-}
 choice :: MonadCatch m => Int -> SerialT m Int -> m Int
 choice value = do
-    IP.parseD (asum (replicate value (PR.satisfy (< 0)))
+    IP.parse (asum (replicate value (PR.satisfy (< 0)))
         AP.<|> PR.satisfy (> 0))
-    -}
 
 -------------------------------------------------------------------------------
 -- Benchmarks
@@ -177,23 +181,22 @@ choice value = do
 o_1_space_serial_parse :: Int -> [Benchmark]
 o_1_space_serial_parse value =
     [ benchIOSink value "any" $ any value
-    {-, benchIOSink value "all" $ all value
+    , benchIOSink value "all" $ all value
     , benchIOSink value "take" $ take value
     , benchIOSink value "takeWhile" $ takeWhile value
     , benchIOSink value "split (all,any)" $ splitAllAny value
+    , benchIOSink value "splitWith (all,any)" $ splitWithAllAny value
     , benchIOSink value "many" many
     , benchIOSink value "some" some
-    , benchIOSink value "choice/100" $ choice (value `div` 100)
+    , benchIOSink value "choice" $ choice value
     , benchIOSink value "tee (all,any)" $ teeAllAny value
     , benchIOSink value "teeFst (all,any)" $ teeFstAllAny value
     , benchIOSink value "shortest (all,any)" $ shortestAllAny value
     , benchIOSink value "longest (all,any)" $ longestAllAny value
-    , benchIOSink value "sequenceA/100" $ sequenceA (value `div` 100)
-    , benchIOSink value "sequence/100" $ sequence (value `div` 100)
-    -}
+    , benchIOSink value "sequenceA" $ sequenceA value
+    , benchIOSink value "sequence" $ sequence value
     ]
 
-{-
 o_1_heap_serial_parse :: Int -> [Benchmark]
 o_1_heap_serial_parse value =
     [ benchIOSink value "lookAhead" $ lookAhead value
@@ -201,7 +204,6 @@ o_1_heap_serial_parse value =
     , benchIOSink value "someAlt" someAlt
     , benchIOSink value "manyTill" $ manyTill value
     ]
-    -}
 
 -------------------------------------------------------------------------------
 -- Driver
@@ -221,12 +223,10 @@ main = do
                   o_1_space_serial_parse value
                 ]
             ]
-            {-
         , bgroup "o-n-heap"
             [ bgroup "parser" $ concat
                 [
                   o_1_heap_serial_parse value
                 ]
             ]
-            -}
         ]

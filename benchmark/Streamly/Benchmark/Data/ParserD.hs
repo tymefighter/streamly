@@ -20,6 +20,7 @@ import System.Random (randomRIO)
 import Prelude hiding (any, all, take, sequence, sequenceA, takeWhile)
 
 import qualified Data.Traversable as TR
+import qualified Data.Foldable as F
 import qualified Control.Applicative as AP
 import qualified Streamly as S hiding (runStream)
 import qualified Streamly.Prelude  as S
@@ -145,6 +146,11 @@ lookAhead :: MonadThrow m => Int -> SerialT m Int -> m ()
 lookAhead value =
     IP.parseD (PR.lookAhead (PR.takeWhile (<= value) FL.drain) *> pure ())
 
+{-# INLINE sequenceA_ #-}
+sequenceA_ :: MonadThrow m => Int -> SerialT m Int -> m ()
+sequenceA_ value xs = do
+    IP.parseD (F.sequenceA_ (replicate value (PR.satisfy (> 0)))) xs
+
 -- quadratic complexity
 {-# INLINE sequenceA #-}
 sequenceA :: MonadThrow m => Int -> SerialT m Int -> m Int
@@ -187,6 +193,7 @@ o_1_space_serial_parse value =
     , benchIOSink value "shortest (all,any)" $ shortestAllAny value
     , benchIOSink value "longest (all,any)" $ longestAllAny value
     , benchIOSink value "sequenceA/100" $ sequenceA (value `div` 100)
+    , benchIOSink value "sequenceA_/100" $ sequenceA_ (value `div` 100)
     , benchIOSink value "sequence/100" $ sequence (value `div` 100)
     ]
 

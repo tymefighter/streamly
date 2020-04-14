@@ -122,6 +122,7 @@ module Streamly.Internal.Data.Parser.ParserD.Types
     , splitSome
     , splitMany
     , alt
+    , concatMap
     )
 where
 
@@ -129,6 +130,7 @@ import Control.Applicative (Alternative(..))
 import Control.Exception (assert, Exception(..))
 import Control.Monad (MonadPlus(..))
 import Control.Monad.Catch (MonadCatch, try)
+import Prelude hiding (concatMap)
 
 import Fusion.Plugin.Types (Fuse(..))
 import Streamly.Internal.Data.Fold (Fold(..), toList)
@@ -316,6 +318,45 @@ splitWith func (Parser stepL initialL extractL)
         rR <- extractR sR
         return $ func rL rR
 
+{-# ANN type SeqAState Fuse #-}
+data SeqAState sl sr = SeqAL sl | SeqAR sr
+
+-- This turns out to be slightly faster than splitWith
+{-# INLINE split_ #-}
+split_ :: Applicative m => Parser m x a -> Parser m x b -> Parser m x b
+split_ (Parser stepL initialL extractL) (Parser stepR initialR extractR) =
+    Parser step initial extract
+
+    where
+
+    initial = SeqAL <$> initialL
+
+    -- Note: For the composed parse to terminate, the left parser has to be
+    -- a terminating parser returning a Stop at some point.
+    step (SeqAL st) a = do
+        (\r i -> case r of
+            -- Note: this leads to buffering even if we are not in an
+            -- Alternative composition.
+            Yield _ s -> Skip 0 (SeqAL s)
+            Skip n s -> Skip n (SeqAL s)
+            Stop n b -> Skip n (SeqAR i)
+            Error err -> Error err) <$> stepL st a <*> initialR
+
+    step (SeqAR st) a = do
+        (\r -> case r of
+            Yield n s -> Yield n (SeqAR s)
+            Skip n s -> Skip n (SeqAR s)
+            Stop n b -> Stop n b
+            Error err -> Error err) <$> stepR st a
+
+    extract (SeqAR sR) = extractR sR
+    extract (SeqAL sL) = error "SeqParseL" {- do
+        rL <- extractL sL
+        sR <- initialR
+        rR <- extractR sR
+        return $ func rL rR
+        -}
+
 -- | 'Applicative' form of 'splitWith'.
 instance Monad m => Applicative (Parser m a) where
     {-# INLINE pure #-}
@@ -323,6 +364,9 @@ instance Monad m => Applicative (Parser m a) where
 
     {-# INLINE (<*>) #-}
     (<*>) = splitWith id
+
+    {-# INLINE (*>) #-}
+    (*>) = split_
 
 -------------------------------------------------------------------------------
 -- Sequential Alternative
@@ -540,6 +584,43 @@ instance MonadCatch m => Alternative (Parser m a) where
 {-# ANN type ConcatParseState Fuse #-}
 data ConcatParseState sl p = ConcatParseL sl | ConcatParseR p
 
+-- XXX what concatMap is to streams, splitParse is to parsers
+{-# INLINE concatMap #-}
+concatMap :: Monad m => (b -> Parser m a c) -> Parser m a b -> Parser m a c
+concatMap func (Parser stepL initialL extractL) = Parser step initial extract
+
+    where
+
+    initial = ConcatParseL <$> initialL
+
+    step (ConcatParseL st) a = do
+        r <- stepL st a
+        return $ case r of
+            Yield _ s -> Skip 0 (ConcatParseL s)
+            Skip n s -> Skip n (ConcatParseL s)
+            Stop n b -> Skip n (ConcatParseR (func b))
+            Error err -> Error err
+
+    step (ConcatParseR (Parser stepR initialR extractR)) a = do
+        st <- initialR
+        r <- stepR st a
+        return $ case r of
+            Yield n s ->
+                Yield n (ConcatParseR (Parser stepR (return s) extractR))
+            Skip n s ->
+                Skip n (ConcatParseR (Parser stepR (return s) extractR))
+            Stop n b -> Stop n b
+            Error err -> Error err
+
+    extract (ConcatParseR (Parser _ initialR extractR)) =
+        initialR >>= extractR
+
+    extract (ConcatParseL sL) = extractL sL >>= f . func
+
+        where
+
+        f (Parser _ initialR extractR) = initialR >>= extractR
+
 -- Note: The monad instance has quadratic performance complexity. It works fine
 -- for small number of compositions but for a scalable implementation we need a
 -- CPS version.
@@ -586,41 +667,8 @@ instance Monad m => Monad (Parser m a) where
     {-# INLINE return #-}
     return = pure
 
-    -- (>>=) :: Parser m a b -> (b -> Parser m a c) -> Parser m a c
     {-# INLINE (>>=) #-}
-    (Parser stepL initialL extractL) >>= func = Parser step initial extract
-
-        where
-
-        initial = ConcatParseL <$> initialL
-
-        step (ConcatParseL st) a = do
-            r <- stepL st a
-            return $ case r of
-                Yield _ s -> Skip 0 (ConcatParseL s)
-                Skip n s -> Skip n (ConcatParseL s)
-                Stop n b -> Skip n (ConcatParseR (func b))
-                Error err -> Error err
-
-        step (ConcatParseR (Parser stepR initialR extractR)) a = do
-            st <- initialR
-            r <- stepR st a
-            return $ case r of
-                Yield n s ->
-                    Yield n (ConcatParseR (Parser stepR (return s) extractR))
-                Skip n s ->
-                    Skip n (ConcatParseR (Parser stepR (return s) extractR))
-                Stop n b -> Stop n b
-                Error err -> Error err
-
-        extract (ConcatParseR (Parser _ initialR extractR)) =
-            initialR >>= extractR
-
-        extract (ConcatParseL sL) = extractL sL >>= f . func
-
-            where
-
-            f (Parser _ initialR extractR) = initialR >>= extractR
+    (>>=) = flip concatMap
 
 -- | 'mzero' is same as 'empty', it aborts the parser. 'mplus' is same as
 -- '<|>', it selects the first succeeding parser.

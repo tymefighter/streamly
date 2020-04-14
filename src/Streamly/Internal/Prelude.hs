@@ -1206,7 +1206,7 @@ runSink = fold . toFold
 --
 -- /Internal/
 --
-{-# INLINE_LATE parseD #-}
+{-# INLINE_NORMAL parseD #-}
 parseD :: MonadThrow m => PRD.Parser m a b -> SerialT m a -> m b
 parseD (PRD.Parser step initial extract) = P.parselMx' step initial extract
 
@@ -1223,11 +1223,11 @@ parseK parser xs = do
 --
 -- /Internal/
 --
-{-# INLINE_EARLY parse #-}
+{-# INLINE [3] parse #-}
 parse :: MonadThrow m => Parser m a b -> SerialT m a -> m b
 parse = parseD . PRD.fromParserK
--- {-# RULES "parse fallback to CPS" [1]
---     forall a. parseD (PRD.fromParserK a) = parseK a #-}
+{-# RULES "parse fallback to CPS" [2]
+    forall a. parseD (PRD.fromParserK a) = parseK a #-}
 
 ------------------------------------------------------------------------------
 -- Specialized folds

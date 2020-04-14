@@ -46,7 +46,6 @@ module Streamly.Internal.Data.Parser
     -- * Accumulators
     , fromFold
     , any
-    {-
     , all
     , yield
     , yieldM
@@ -115,6 +114,9 @@ module Streamly.Internal.Data.Parser
     -- secondary parser.
     , deintercalate
 
+    -- ** Sequential Alternative
+    , alt
+
     -- ** Parallel Alternatives
     , shortest
     , longest
@@ -123,6 +125,7 @@ module Streamly.Internal.Data.Parser
     -- * N-ary Combinators
     -- ** Sequential Collection
     , sequence
+    , concatMap
 
     -- ** Sequential Repetition
     , count
@@ -175,24 +178,18 @@ module Streamly.Internal.Data.Parser
     -- , retryMax    -- try N times
     -- , retryUntil  -- try until successful
     -- , retryUntilN -- try until successful n times
-    -}
     )
 where
 
-import Control.Exception (assert)
-import Control.Monad.Catch (MonadCatch, MonadThrow(..))
+import Control.Monad.Catch (MonadCatch)
 import Prelude
-       hiding (any, all, take, takeWhile, sequence)
+       hiding (any, all, take, takeWhile, sequence, concatMap)
 
 import Streamly.Internal.Data.Fold.Types (Fold(..))
 import Streamly.Internal.Data.Parser.ParserK.Types (Parser)
 
 import qualified Streamly.Internal.Data.Parser.ParserD as D
-import qualified Streamly.Internal.Data.Parser.ParserD.Tee as D
 import qualified Streamly.Internal.Data.Parser.ParserK.Types as K
-import qualified Streamly.Internal.Data.Zipper as Z
-
-import Streamly.Internal.Data.Strict
 
 -------------------------------------------------------------------------------
 -- Upgrade folds to parses
@@ -216,26 +213,56 @@ fromFold = D.toParserK . D.fromFold
 any :: MonadCatch m => (a -> Bool) -> Parser m a Bool
 any = D.toParserK . D.any
 
-{-
 -- |
 -- >>> S.parse (PR.all (== 0)) $ S.fromList [1,0,1]
 -- > Right False
 --
-{-# INLINABLE all #-}
-all :: Monad m => (a -> Bool) -> Parser m a Bool
-all predicate = Parser step initial return
+{-# INLINE all #-}
+all :: MonadCatch m => (a -> Bool) -> Parser m a Bool
+all = D.toParserK . D.all
 
-    where
+-- This is the dual of stream "yield".
+--
+-- | A parser that always yields a pure value without consuming any input.
+--
+-- /Internal/
+--
+{-# INLINE yield #-}
+yield :: MonadCatch m => b -> Parser m a b
+yield = D.toParserK . D.yield
 
-    initial = return True
+-- This is the dual of stream "yieldM".
+--
+-- | A parser that always yields the result of an effectful action without
+-- consuming any input.
+--
+-- /Internal/
+--
+{-# INLINE yieldM #-}
+yieldM :: MonadCatch m => m b -> Parser m a b
+yieldM = D.toParserK . D.yieldM
 
-    step s a = return $
-        if s
-        then
-            if predicate a
-            then Yield 0 True
-            else Stop 0 False
-        else Stop 0 False
+-- This is the dual of "nil".
+--
+-- | A parser that always fails with an error message without consuming
+-- any input.
+--
+-- /Internal/
+--
+{-# INLINE die #-}
+die :: MonadCatch m => String -> Parser m a b
+die = D.toParserK . D.die
+
+-- This is the dual of "nilM".
+--
+-- | A parser that always fails with an effectful error message and without
+-- consuming any input.
+--
+-- /Internal/
+--
+{-# INLINE dieM #-}
+dieM :: MonadCatch m => m String -> Parser m a b
+dieM = D.toParserK . D.dieM
 
 -------------------------------------------------------------------------------
 -- Failing Parsers
@@ -253,17 +280,9 @@ all predicate = Parser step initial return
 --
 -- /Internal/
 --
-{-# INLINABLE peek #-}
-peek :: MonadThrow m => Parser m a a
-peek = Parser step initial extract
-
-    where
-
-    initial = return ()
-
-    step () a = return $ Stop 1 a
-
-    extract () = throwM $ ParseError "peek: end of input"
+{-# INLINE peek #-}
+peek :: MonadCatch m => Parser m a a
+peek = D.toParserK $ D.peek
 
 -- | Succeeds if we are at the end of input, fails otherwise.
 --
@@ -272,15 +291,9 @@ peek = Parser step initial extract
 --
 -- /Internal/
 --
-{-# INLINABLE eof #-}
-eof :: Monad m => Parser m a ()
-eof = Parser step initial return
-
-    where
-
-    initial = return ()
-
-    step () _ = return $ Error "eof: not at end of input"
+{-# INLINE eof #-}
+eof :: MonadCatch m => Parser m a ()
+eof = D.toParserK $ D.eof
 
 -- | Returns the next element if it passes the predicate, fails otherwise.
 --
@@ -290,19 +303,8 @@ eof = Parser step initial return
 -- /Internal/
 --
 {-# INLINE satisfy #-}
-satisfy :: MonadThrow m => (a -> Bool) -> Parser m a a
-satisfy predicate = Parser step initial extract
-
-    where
-
-    initial = return ()
-
-    step () a = return $
-        if predicate a
-        then Stop 0 a
-        else Error "satisfy: predicate failed"
-
-    extract _ = throwM $ ParseError "satisfy: end of input"
+satisfy :: MonadCatch m => (a -> Bool) -> Parser m a a
+satisfy = D.toParserK . D.satisfy
 
 -------------------------------------------------------------------------------
 -- Taking elements
@@ -327,22 +329,8 @@ satisfy predicate = Parser step initial extract
 -- /Internal/
 --
 {-# INLINE take #-}
-take :: Monad m => Int -> Fold m a b -> Parser m a b
-take n (Fold fstep finitial fextract) = Parser step initial extract
-
-    where
-
-    initial = Tuple' 0 <$> finitial
-
-    step (Tuple' i r) a = do
-        res <- fstep r a
-        let i1 = i + 1
-            s1 = Tuple' i1 res
-        if i1 < n
-        then return $ Yield 0 s1
-        else Stop 0 <$> fextract res
-
-    extract (Tuple' _ r) = fextract r
+take :: MonadCatch m => Int -> Fold m a b -> Parser m a b
+take n = D.toParserK . D.take n
 
 --
 -- XXX can we use a "cmp" operation in a common implementation?
@@ -358,29 +346,8 @@ take n (Fold fstep finitial fextract) = Parser step initial extract
 -- /Internal/
 --
 {-# INLINE takeEQ #-}
-takeEQ :: MonadThrow m => Int -> Fold m a b -> Parser m a b
-takeEQ n (Fold fstep finitial fextract) = Parser step initial extract
-
-    where
-
-    initial = Tuple' 0 <$> finitial
-
-    step (Tuple' i r) a = do
-        res <- fstep r a
-        let i1 = i + 1
-            s1 = Tuple' i1 res
-        if i1 < n then return (Skip 0 s1) else Stop 0 <$> fextract res
-
-    extract (Tuple' i r) =
-        if n == i
-        then fextract r
-        else throwM $ ParseError err
-
-        where
-
-        err =
-               "takeEQ: Expecting exactly " ++ show n
-            ++ " elements, got " ++ show i
+takeEQ :: MonadCatch m => Int -> Fold m a b -> Parser m a b
+takeEQ n = D.toParserK . D.takeEQ n
 
 -- | Take at least @n@ input elements, but can collect more.
 --
@@ -396,34 +363,8 @@ takeEQ n (Fold fstep finitial fextract) = Parser step initial extract
 -- /Internal/
 --
 {-# INLINE takeGE #-}
-takeGE :: MonadThrow m => Int -> Fold m a b -> Parser m a b
-takeGE n (Fold fstep finitial fextract) = Parser step initial extract
-
-    where
-
-    initial = Tuple' 0 <$> finitial
-
-    step (Tuple' i r) a = do
-        res <- fstep r a
-        let i1 = i + 1
-            s1 = Tuple' i1 res
-        return $
-            if i1 < n
-            then Skip 0 s1
-            else Yield 0 s1
-
-    extract (Tuple' i r) = fextract r >>= f
-
-        where
-
-        err =
-              "takeGE: Expecting at least " ++ show n
-           ++ " elements, got only " ++ show i
-
-        f x =
-            if i >= n
-            then return x
-            else throwM $ ParseError err
+takeGE :: MonadCatch m => Int -> Fold m a b -> Parser m a b
+takeGE n = D.toParserK . D.takeGE n
 
 -- | Collect stream elements until an element fails the predicate. The element
 -- on which the predicate fails is returned back to the input stream.
@@ -443,50 +384,16 @@ takeGE n (Fold fstep finitial fextract) = Parser step initial extract
 -- /Internal/
 --
 {-# INLINE takeWhile #-}
-takeWhile :: Monad m => (a -> Bool) -> Fold m a b -> Parser m a b
-takeWhile predicate (Fold fstep finitial fextract) =
-    Parser step initial fextract
-
-    where
-
-    initial = finitial
-
-    step s a =
-        if predicate a
-        then Yield 0 <$> fstep s a
-        else Stop 1 <$> fextract s
+takeWhile :: MonadCatch m => (a -> Bool) -> Fold m a b -> Parser m a b
+takeWhile cond = D.toParserK . D.takeWhile cond
 
 -- | Like 'takeWhile' but takes at least one element otherwise fails.
 --
 -- /Internal/
 --
 {-# INLINE takeWhile1 #-}
-takeWhile1 :: MonadThrow m => (a -> Bool) -> Fold m a b -> Parser m a b
-takeWhile1 predicate (Fold fstep finitial fextract) =
-    Parser step initial extract
-
-    where
-
-    initial = return Nothing
-
-    step Nothing a =
-        if predicate a
-        then do
-            s <- finitial
-            r <- fstep s a
-            return $ Yield 0 (Just r)
-        else return $ Error "takeWhile1: empty"
-    step (Just s) a =
-        if predicate a
-        then do
-            r <- fstep s a
-            return $ Yield 0 (Just r)
-        else do
-            b <- fextract s
-            return $ Stop 1 b
-
-    extract Nothing = throwM $ ParseError "takeWhile1: end of input"
-    extract (Just s) = fextract s
+takeWhile1 :: MonadCatch m => (a -> Bool) -> Fold m a b -> Parser m a b
+takeWhile1 cond = D.toParserK . D.takeWhile1 cond
 
 -- | Collect stream elements until an element succeeds the predicate. Drop the
 -- element on which the predicate succeeded. The succeeding element is treated
@@ -506,17 +413,8 @@ takeWhile1 predicate (Fold fstep finitial fextract) =
 -- /Internal/
 --
 {-# INLINABLE sliceSepBy #-}
-sliceSepBy :: Monad m => (a -> Bool) -> Fold m a b -> Parser m a b
-sliceSepBy predicate (Fold fstep finitial fextract) =
-    Parser step initial fextract
-
-    where
-
-    initial = finitial
-    step s a =
-        if not (predicate a)
-        then Yield 0 <$> fstep s a
-        else Stop 0 <$> fextract s
+sliceSepBy :: MonadCatch m => (a -> Bool) -> Fold m a b -> Parser m a b
+sliceSepBy cond = D.toParserK . D.sliceSepBy cond
 
 -- | Collect stream elements until an element succeeds the predicate. Also take
 -- the element on which the predicate succeeded. The succeeding element is
@@ -561,24 +459,9 @@ sliceBeginWith = undefined
 -- /Internal/
 --
 {-# INLINABLE sliceSepByMax #-}
-sliceSepByMax :: Monad m
+sliceSepByMax :: MonadCatch m
     => (a -> Bool) -> Int -> Fold m a b -> Parser m a b
-sliceSepByMax predicate cnt (Fold fstep finitial fextract) =
-    Parser step initial extract
-
-    where
-
-    initial = Tuple' 0 <$> finitial
-    step (Tuple' i r) a = do
-        res <- fstep r a
-        let i1 = i + 1
-            s1 = Tuple' i1 res
-        if not (predicate a) && i1 < cnt
-        then return $ Yield 0 s1
-        else do
-            b <- fextract res
-            return $ Stop 0 b
-    extract (Tuple' _ r) = fextract r
+sliceSepByMax cond cnt = D.toParserK . D.sliceSepByMax cond cnt
 
 -- | Like 'splitOn' but strips leading, trailing, and repeated separators.
 -- Therefore, @".a..b."@ having '.' as the separator would be parsed as
@@ -630,55 +513,116 @@ groupBy = undefined
 -- /Internal/
 --
 {-# INLINE eqBy #-}
-eqBy :: MonadThrow m => (a -> a -> Bool) -> [a] -> Parser m a ()
-eqBy cmp str = Parser step initial extract
-
-    where
-
-    initial = return str
-
-    step [] _ = error "Bug: unreachable"
-    step [x] a = return $
-        if x `cmp` a
-        then Stop 0 ()
-        else Error $
-            "eqBy: failed, at the last element"
-    step (x:xs) a = return $
-        if x `cmp` a
-        then Skip 0 xs
-        else Error $
-            "eqBy: failed, yet to match " ++ show (length xs) ++ " elements"
-
-    extract xs = throwM $ ParseError $
-        "eqBy: end of input, yet to match " ++ show (length xs) ++ " elements"
+eqBy :: MonadCatch m => (a -> a -> Bool) -> [a] -> Parser m a ()
+eqBy cmp = D.toParserK . D.eqBy cmp
 
 -------------------------------------------------------------------------------
 -- nested parsers
 -------------------------------------------------------------------------------
 
+-- This is fused version of applicative instance. This has quadratic complexity
+-- when multiple of these are composed together. This can be much faster when a
+-- few fast parsers are to be composed together.
+--
+-- | Sequential application. Apply two parsers sequentially to an input stream.
+-- The input is provided to the first parser, when it is done the remaining
+-- input is provided to the second parser. If both the parsers succeed their
+-- outputs are combined using the supplied function. The operation fails if any
+-- of the parsers fail.
+--
+-- This undoes an "append" of two streams, it splits the streams using two
+-- parsers and zips the results.
+--
+-- This implementation is strict in the second argument, therefore, the
+-- following will fail:
+--
+-- >>> S.parse (PR.satisfy (> 0) *> undefined) $ S.fromList [1]
+--
+-- /Internal/
+--
+{-# INLINE splitWith #-}
+splitWith :: MonadCatch m
+    => (a -> b -> c) -> Parser m x a -> Parser m x b -> Parser m x c
+splitWith f p1 p2 =
+    D.toParserK $ D.splitWith f (D.fromParserK p1) (D.fromParserK p2)
+
+-- | @teeWith f p1 p2@ distributes its input to both @p1@ and @p2@ until both
+-- of them succeed or fail and combines their output using @f@. The parser
+-- succeeds if both the parsers succeed.
+--
+-- /Internal/
+--
+{-# INLINE teeWith #-}
+teeWith :: MonadCatch m
+    => (a -> b -> c) -> Parser m x a -> Parser m x b -> Parser m x c
+teeWith f p1 p2 =
+    D.toParserK $ D.teeWith f (D.fromParserK p1) (D.fromParserK p2)
+
+-- | Like 'teeWith' but ends parsing and zips the results, if available,
+-- whenever the first parser ends.
+--
+-- /Internal/
+--
+{-# INLINE teeWithFst #-}
+teeWithFst :: MonadCatch m
+    => (a -> b -> c) -> Parser m x a -> Parser m x b -> Parser m x c
+teeWithFst f p1 p2 =
+    D.toParserK $ D.teeWithFst f (D.fromParserK p1) (D.fromParserK p2)
+
+-- | Like 'teeWith' but ends parsing and zips the results, if available,
+-- whenever any of the parsers ends or fails.
+--
+-- /Unimplemented/
+--
+{-# INLINE teeWithMin #-}
+teeWithMin :: MonadCatch m
+    => (a -> b -> c) -> Parser m x a -> Parser m x b -> Parser m x c
+teeWithMin f p1 p2 =
+    D.toParserK $ D.teeWithMin f (D.fromParserK p1) (D.fromParserK p2)
+
+-- This is the fused version, which can be much faster than the Alternative
+-- instance but it has quadratic complexity.
+--
+-- | Sequential alternative. Apply the input to the first parser and return the
+-- result if the parser succeeds. If the first parser fails then backtrack and
+-- apply the same input to the second parser and return the result.
+--
+-- Note: This implementation is not lazy in the second argument. The following
+-- will fail:
+--
+-- >>> S.parse (PR.satisfy (> 0) `PR.alt` undefined) $ S.fromList [1..10]
+--
+-- /Internal/
+--
+{-# INLINE alt #-}
+alt :: MonadCatch m => Parser m x a -> Parser m x a -> Parser m x a
+alt p1 p2 = D.toParserK $ D.alt (D.fromParserK p1) (D.fromParserK p2)
+
+-- | Shortest alternative. Apply both parsers in parallel but choose the result
+-- from the one which consumed least input i.e. take the shortest succeeding
+-- parse.
+--
+-- /Internal/
+--
+{-# INLINE shortest #-}
+shortest :: MonadCatch m
+    => Parser m x a -> Parser m x a -> Parser m x a
+shortest p1 p2 = D.toParserK $ D.shortest (D.fromParserK p1) (D.fromParserK p2)
+
+-- | Longest alternative. Apply both parsers in parallel but choose the result
+-- from the one which consumed more input i.e. take the longest succeeding
+-- parse.
+--
+-- /Internal/
+--
+{-# INLINE longest #-}
+longest :: MonadCatch m
+    => Parser m x a -> Parser m x a -> Parser m x a
+longest p1 p2 = D.toParserK $ D.longest (D.fromParserK p1) (D.fromParserK p2)
+
 {-# INLINE lookAhead #-}
-lookAhead :: MonadThrow m => Parser m a b -> Parser m a b
-lookAhead (Parser step1 initial1 _) =
-    Parser step initial extract
-
-    where
-
-    initial = Tuple' 0 <$> initial1
-
-    step (Tuple' cnt st) a = do
-        r <- step1 st a
-        let cnt1 = cnt + 1
-        return $ case r of
-            Yield _ s -> Skip 0 (Tuple' cnt1 s)
-            Skip n s -> Skip n (Tuple' (cnt1 - n) s)
-            Stop _ b -> Stop cnt1 b
-            Error err -> Error err
-
-    -- XXX returning an error let's us backtrack.  To implement it in a way so
-    -- that it terminates on eof without an error then we need a way to
-    -- backtrack on eof, that will require extract to return 'Step' type.
-    extract (Tuple' n _) = throwM $ ParseError $
-        "lookAhead: end of input after consuming " ++ show n ++ " elements"
+lookAhead :: MonadCatch m => Parser m a b -> Parser m a b
+lookAhead p = D.toParserK $ D.lookAhead $ D.fromParserK p
 
 -------------------------------------------------------------------------------
 -- Interleaving
@@ -731,6 +675,12 @@ sequence ::
     Fold m b c -> t (Parser m a b) -> Parser m a c
 sequence _f _p = undefined
 
+{-# INLINE concatMap #-}
+concatMap :: MonadCatch m
+    => (b -> Parser m a c) -> Parser m a b -> Parser m a c
+concatMap f p =
+    D.toParserK $ D.concatMap (\x -> D.fromParserK $ f x) (D.fromParserK p)
+
 -------------------------------------------------------------------------------
 -- Alternative Collection
 -------------------------------------------------------------------------------
@@ -763,7 +713,7 @@ choice _ps = undefined
 --
 {-# INLINE many #-}
 many :: MonadCatch m => Fold m b c -> Parser m a b -> Parser m a c
-many = splitMany
+many f p = D.toParserK $ D.many f (D.fromParserK p)
 -- many = countBetween 0 maxBound
 
 -- | Collect one or more parses. Apply the supplied parser repeatedly on the
@@ -777,7 +727,7 @@ many = splitMany
 --
 {-# INLINE some #-}
 some :: MonadCatch m => Fold m b c -> Parser m a b -> Parser m a c
-some = splitSome
+some f p = D.toParserK $ D.some f (D.fromParserK p)
 -- some f p = many (takeGE 1 f) p
 -- many = countBetween 1 maxBound
 
@@ -807,8 +757,6 @@ count ::
 count n = countBetween n n
 -- count n f p = many (takeEQ n f) p
 
-data ManyTillState fs sr sl = ManyTillR Int fs sr | ManyTillL fs sl
-
 -- | @manyTill f collect test@ tries the parser @test@ on the input, if @test@
 -- fails it backtracks and tries @collect@, after @collect@ succeeds @test@ is
 -- tried again and so on. The parser stops when @test@ succeeds.  The output of
@@ -820,44 +768,4 @@ data ManyTillState fs sr sl = ManyTillR Int fs sr | ManyTillL fs sl
 {-# INLINE manyTill #-}
 manyTill :: MonadCatch m
     => Fold m b c -> Parser m a b -> Parser m a x -> Parser m a c
-manyTill (Fold fstep finitial fextract)
-         (Parser stepL initialL extractL)
-         (Parser stepR initialR _) =
-    Parser step initial extract
-
-    where
-
-    initial = do
-        fs <- finitial
-        ManyTillR 0 fs <$> initialR
-
-    step (ManyTillR cnt fs st) a = do
-        r <- stepR st a
-        case r of
-            Yield n s -> return $ Yield n (ManyTillR 0 fs s)
-            Skip n s -> do
-                assert (cnt + 1 - n >= 0) (return ())
-                return $ Skip n (ManyTillR (cnt + 1 - n) fs s)
-            Stop n _ -> do
-                b <- fextract fs
-                return $ Stop n b
-            Error _ -> do
-                rR <- initialL
-                return $ Skip (cnt + 1) (ManyTillL fs rR)
-
-    step (ManyTillL fs st) a = do
-        r <- stepL st a
-        case r of
-            Yield n s -> return $ Yield n (ManyTillL fs s)
-            Skip n s -> return $ Skip n (ManyTillL fs s)
-            Stop n b -> do
-                fs1 <- fstep fs b
-                l <- initialR
-                -- XXX we need a yield with backtrack here
-                -- return $ Yield n (ManyTillR 0 fs1 l)
-                return $ Skip n (ManyTillR 0 fs1 l)
-            Error err -> return $ Error err
-
-    extract (ManyTillL fs sR) = extractL sR >>= fstep fs >>= fextract
-    extract (ManyTillR _ fs _) = fextract fs
-    -}
+manyTill f p1 p2 = D.toParserK $ D.manyTill f (D.fromParserK p1) (D.fromParserK p2)
