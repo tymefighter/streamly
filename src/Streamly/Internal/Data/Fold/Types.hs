@@ -25,14 +25,12 @@ module Streamly.Internal.Data.Fold.Types
 -}
     , lmap
     , lmapM
-{-
     , lfilter
     , lfilterM
     , lcatMaybes
     , ltake
     , ltakeWhile
     , lsessionsOf
--}
     , lchunksOf
 {-
     , lchunksOf2
@@ -290,7 +288,7 @@ lmapM :: Monad m => (a -> m b) -> Fold m b r -> Fold m a r
 lmapM f (Fold step begin done) = Fold step' begin done
   where
     step' x a = f a >>= step x
-{-
+
 ------------------------------------------------------------------------------
 -- Filtering
 ------------------------------------------------------------------------------
@@ -305,7 +303,7 @@ lmapM f (Fold step begin done) = Fold step' begin done
 lfilter :: Monad m => (a -> Bool) -> Fold m a r -> Fold m a r
 lfilter f (Fold step begin done) = Fold step' begin done
   where
-    step' x a = if f a then step x a else return x
+    step' x a = if f a then step x a else return $ Yield x
 
 -- | Like 'lfilter' but with a monadic predicate.
 --
@@ -316,7 +314,7 @@ lfilterM f (Fold step begin done) = Fold step' begin done
   where
     step' x a = do
       use <- f a
-      if use then step x a else return x
+      if use then step x a else return $ Yield x
 
 -- | Transform a fold from a pure input to a 'Maybe' input, consuming only
 -- 'Just' values.
@@ -342,8 +340,10 @@ ltake n (Fold step initial done) = Fold step' initial' done'
         if i < n
         then do
             res <- step r a
-            return $ Tuple' (i + 1) res
-        else return $ Tuple' i r
+            case res of
+                Yield s -> return $ Yield $ Tuple' (i + 1) s
+                Stop b -> return $ Stop b
+        else Stop <$> done r
     done' (Tuple' _ r) = done r
 
 -- | Takes elements from the input as long as the predicate succeeds.
@@ -351,17 +351,15 @@ ltake n (Fold step initial done) = Fold step' initial' done'
 -- @since 0.7.0
 {-# INLINABLE ltakeWhile #-}
 ltakeWhile :: Monad m => (a -> Bool) -> Fold m a b -> Fold m a b
-ltakeWhile predicate (Fold step initial done) = Fold step' initial' done'
+ltakeWhile predicate (Fold step initial done) = Fold step' initial done
     where
-    initial' = fmap Left' initial
-    step' (Left' r) a = do
+    step' r a = do
         if predicate a
-        then fmap Left' $ step r a
-        else return (Right' r)
-    step' r _ = return r
-    done' (Left' r) = done r
-    done' (Right' r) = done r
+        then step r a
+        else Stop <$> done r
 
+
+{-
 ------------------------------------------------------------------------------
 -- Nesting
 ------------------------------------------------------------------------------
@@ -465,7 +463,7 @@ lchunksOf2 n (Fold step1 initial1 extract1) (Fold2 step2 inject2 extract2) =
         res <- extract1 r1
         acc2 <- step2 r2 res
         extract2 acc2
-
+-}
 -- | Group the input stream into windows of n second each and then fold each
 -- group using the provided fold function.
 --
@@ -478,6 +476,7 @@ lchunksOf2 n (Fold step1 initial1 extract1) (Fold2 step2 inject2 extract2) =
 -- -----Fold m a b----|-Fold n a c-|-Fold n a c-|-...-|----Fold m a c
 --
 -- @
+-- XXX Should we check for mv2 at each step?
 {-# INLINE lsessionsOf #-}
 lsessionsOf :: MonadAsync m => Double -> Fold m a b -> Fold m b c -> Fold m a c
 lsessionsOf n (Fold step1 initial1 extract1) (Fold step2 initial2 extract2) =
@@ -487,8 +486,8 @@ lsessionsOf n (Fold step1 initial1 extract1) (Fold step2 initial2 extract2) =
 
     -- XXX MVar may be expensive we need a cheaper synch mechanism here
     initial' = do
-        i1 <- initial1
-        i2 <- initial2
+        i1 <- initialTSM initial1
+        i2 <- initialTSM initial2
         mv1 <- liftIO $ newMVar i1
         mv2 <- liftIO $ newMVar (Right i2)
         t <- control $ \run ->
@@ -496,33 +495,40 @@ lsessionsOf n (Fold step1 initial1 extract1) (Fold step2 initial2 extract2) =
                 tid <- forkIO $ catch (restore $ void $ run (timerThread mv1 mv2))
                                       (handleChildException mv2)
                 run (return tid)
-        return $ Tuple3' t mv1 mv2
-    step' acc@(Tuple3' _ mv1 _) a = do
+        return $ Tuple3' t (Yield mv1) mv2
+    step' acc@(Tuple3' t (Yield mv1) mv2) a = do
             r1 <- liftIO $ takeMVar mv1
-            res <- step1 r1 a
+            res <- stepWS step1 r1 a
             liftIO $ putMVar mv1 res
-            return acc
+            case res of
+                Yield _ -> return $ Yield $ acc
+                Stop _ -> return $ Yield $ Tuple3' t (Stop mv1) mv2
+    step' acc@(Tuple3' _ (Stop _) _) _ = return $ Yield $ acc
     extract' (Tuple3' tid _ mv2) = do
         r2 <- liftIO $ takeMVar mv2
         liftIO $ killThread tid
         case r2 of
             Left e -> throwM e
-            Right x -> extract2 x
+            Right x -> doneWS extract2 x
 
     timerThread mv1 mv2 = do
         liftIO $ threadDelay (round $ n * 1000000)
 
         r1 <- liftIO $ takeMVar mv1
-        i1 <- initial1
+        i1 <- initialTSM initial1
         liftIO $ putMVar mv1 i1
 
-        res1 <- extract1 r1
+        res1 <- doneWS extract1 r1
         r2 <- liftIO $ takeMVar mv2
-        res <- case r2 of
-                    Left _ -> return r2
-                    Right x -> fmap Right $ step2 x res1
-        liftIO $ putMVar mv2 res
-        timerThread mv1 mv2
+        case r2 of
+            Left _ -> liftIO $ putMVar mv2 r2
+            Right x -> do
+                res <- stepWS step2 x res1
+                case res of
+                    Yield _ -> do
+                        liftIO $ putMVar mv2 $ Right res
+                        timerThread mv1 mv2
+                    Stop _ -> liftIO $ putMVar mv2 $ Right res
 
     handleChildException ::
         MVar (Either SomeException a) -> SomeException -> IO ()
@@ -532,4 +538,3 @@ lsessionsOf n (Fold step1 initial1 extract1) (Fold step2 initial2 extract2) =
                     Left _ -> r2
                     Right _ -> Left e
         putMVar mv2 r
--}
