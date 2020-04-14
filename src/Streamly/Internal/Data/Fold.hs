@@ -23,7 +23,8 @@
 module Streamly.Internal.Data.Fold
     (
     -- * Fold Type
-      Fold (..)
+      Step (..)
+    , Fold (..)
 {-
     , hoist
     , generally
@@ -234,6 +235,7 @@ import Streamly.Internal.Data.Strict
 import Streamly.Internal.Data.SVar
 
 import qualified Streamly.Internal.Data.Pipe.Types as Pipe
+import qualified Streamly.Internal.Data.Fold.Types as FL
 {-
 ------------------------------------------------------------------------------
 -- Smart constructors
@@ -395,7 +397,7 @@ drain :: Monad m => Fold m a ()
 drain = Fold step begin done
     where
     begin = return ()
-    step _ _ = return ()
+    step _ _ = FL.Yield <$> return ()
     done = return
 
 -- |
@@ -407,7 +409,7 @@ drain = Fold step begin done
 -- @since 0.7.0
 {-# INLINABLE drainBy #-}
 drainBy ::  Monad m => (a -> m b) -> Fold m a ()
-drainBy f = Fold (const (void . f)) (return ()) return
+drainBy f = Fold (const (fmap FL.Yield . void . f)) (return ()) return
 {-
 {-# INLINABLE drainBy2 #-}
 drainBy2 ::  Monad m => (a -> m b) -> Fold2 m c a ()
@@ -782,7 +784,14 @@ null = Fold (\_ _ -> return False) (return True) return
 -- @since 0.7.0
 {-# INLINABLE any #-}
 any :: Monad m => (a -> Bool) -> Fold m a Bool
-any predicate = Fold (\x a -> return $ x || predicate a) (return False) return
+any predicate =
+    Fold
+        (\_ a ->
+             if predicate a
+                 then return $ FL.Stop True
+                 else return $ FL.Yield False)
+        (return False)
+        return
 {-
 -- | Return 'True' if the given element is present in the stream.
 --
@@ -799,7 +808,14 @@ elem a = any (a ==)
 -- @since 0.7.0
 {-# INLINABLE all #-}
 all :: Monad m => (a -> Bool) -> Fold m a Bool
-all predicate = Fold (\x a -> return $ x && predicate a) (return True) return
+all predicate =
+    Fold
+        (\_ a ->
+             if predicate a
+                 then return $ FL.Yield True
+                 else return $ FL.Stop False)
+        (return True)
+        return
 {-
 -- | Returns 'True' if the given element is not present in the stream.
 --
@@ -1532,6 +1548,7 @@ foldChunks = undefined
 -- | Group the input stream into groups of elements between @low@ and @high@.
 -- Collection starts in chunks of @low@ and then keeps doubling until we reach
 -- @high@. Each chunk is folded using the provided fold function.
+
 --
 -- This could be useful, for example, when we are folding a stream of unknown
 -- size to a stream of arrays and we want to minimize the number of
@@ -1559,11 +1576,12 @@ toParallelSVar svar winfo = Fold step initial extract
 
     initial = return ()
 
-    step () x = liftIO $ do
+    step _ x = liftIO $ do
         -- XXX we can have a separate fold for unlimited buffer case to avoid a
         -- branch in the step here.
         decrementBufferLimit svar
         void $ send svar (ChildYield x)
+        return $ FL.Yield ()
 
     extract () = liftIO $ do
         sendStop svar winfo
@@ -1582,12 +1600,12 @@ toParallelSVarLimited svar winfo = Fold step initial extract
         then do
             decrementBufferLimit svar
             void $ send svar (ChildYield x)
-            return True
+            return $ FL.Yield True
         else do
             cleanupSVarFromWorker svar
             sendStop svar winfo
-            return False
-    step False _ = return False
+            return $ FL.Stop ()
+    step False _ = return $ FL.Stop ()
 
     extract True = liftIO $ sendStop svar winfo
     extract False = return ()

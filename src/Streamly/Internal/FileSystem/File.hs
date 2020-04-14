@@ -353,7 +353,7 @@ writeChunks path = Fold step initial extract
         return (fld, h)
     step (fld, h) x = do
         r <- FL.runStep fld x `MC.onException` liftIO (hClose h)
-        return (r, h)
+        return $ FL.Yield (r, h)
     extract (Fold _ initial1 extract1, h) = do
         liftIO $ hClose h
         initial1 >>= extract1

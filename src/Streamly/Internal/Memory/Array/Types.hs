@@ -110,7 +110,7 @@ import GHC.ForeignPtr (ForeignPtr(..), newForeignPtr_)
 import GHC.IO (IO(IO), unsafePerformIO)
 import GHC.Ptr (Ptr(..))
 
-import Streamly.Internal.Data.Fold.Types (Fold(..))
+import Streamly.Internal.Data.Fold.Types (Fold(..), Step(..))
 import Streamly.Internal.Data.Strict (Tuple'(..))
 import Streamly.Internal.Data.SVar (adaptState)
 
@@ -118,6 +118,7 @@ import Streamly.Internal.Data.SVar (adaptState)
 import Streamly.FileSystem.FDIO (IOVec(..))
 #endif
 
+import qualified Streamly.Internal.Data.Fold.Types as FL
 import qualified Streamly.Memory.Malloc as Malloc
 import qualified Streamly.Internal.Data.Stream.StreamD.Type as D
 import qualified Streamly.Internal.Data.Stream.StreamK as K
@@ -522,10 +523,10 @@ writeNAllocWith alloc n = Fold step initial extract
     where
 
     initial = liftIO $ alloc (max n 0)
-    step arr@(Array _ end bound) _ | end == bound = return arr
+    step arr@(Array _ end bound) _ | end == bound = return $ FL.Stop arr
     step (Array start end bound) x = do
         liftIO $ poke end x
-        return $ Array start (end `plusPtr` sizeOf (undefined :: a)) bound
+        return $ FL.Yield $ Array start (end `plusPtr` sizeOf (undefined :: a)) bound
     -- XXX note that shirkToFit does not maintain alignment, in case we are
     -- using aligned allocation.
     extract = return -- liftIO . shrinkToFit
@@ -584,7 +585,7 @@ writeNUnsafe n = Fold step initial extract
         return $ ArrayUnsafe start end
     step (ArrayUnsafe start end) x = do
         liftIO $ poke end x
-        return $ ArrayUnsafe start (end `plusPtr` sizeOf (undefined :: a))
+        return $ FL.Yield $ ArrayUnsafe start (end `plusPtr` sizeOf (undefined :: a))
     extract (ArrayUnsafe start end) = return $ Array start end end -- liftIO . shrinkToFit
 
 -- XXX The realloc based implementation needs to make one extra copy if we use
@@ -619,8 +620,8 @@ toArrayMinChunk alignSize elemCount = Fold step initial extract
             oldSize = end `minusPtr` p
             newSize = max (oldSize * 2) 1
         arr1 <- liftIO $ reallocAligned alignSize newSize arr
-        insertElem arr1 x
-    step arr x = insertElem arr x
+        FL.Yield <$> insertElem arr1 x
+    step arr x = FL.Yield <$> insertElem arr x
     extract = liftIO . shrinkToFit
 
 -- | Fold the whole input to a single array.
@@ -1151,17 +1152,22 @@ lpackArraysChunksOf n (Fold step1 initial1 extract1) =
     extract (Tuple' Nothing r1) = extract1 r1
     extract (Tuple' (Just buf) r1) = do
         r <- step1 r1 buf
-        extract1 r
+        case r of
+            Yield rr -> extract1 rr
+            Stop _ -> return ()
 
     step (Tuple' Nothing r1) arr =
             let len = byteLength arr
              in if len >= n
                 then do
                     r <- step1 r1 arr
-                    extract1 r
-                    r1' <- initial1
-                    return (Tuple' Nothing r1')
-                else return (Tuple' (Just arr) r1)
+                    case r of
+                        Stop _ -> return $ Stop ()
+                        Yield s -> do
+                            extract1 s
+                            r1' <- initial1
+                            return $ Yield $ Tuple' Nothing r1'
+                else return $ Yield $ Tuple' (Just arr) r1
 
     step (Tuple' (Just buf) r1) arr = do
             let len = byteLength buf + byteLength arr
@@ -1173,10 +1179,13 @@ lpackArraysChunksOf n (Fold step1 initial1 extract1) =
             if len >= n
             then do
                 r <- step1 r1 buf''
-                extract1 r
-                r1' <- initial1
-                return (Tuple' Nothing r1')
-            else return (Tuple' (Just buf'') r1)
+                case r of
+                    Stop _ -> return $ Stop ()
+                    Yield s -> do
+                        extract1 s
+                        r1' <- initial1
+                        return $ Yield $ Tuple' Nothing r1'
+            else return $ Yield $ Tuple' (Just buf'') r1
 
 #if !defined(mingw32_HOST_OS)
 data GatherState s arr

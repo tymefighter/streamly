@@ -12,7 +12,12 @@
 -- Portability : GHC
 
 module Streamly.Internal.Data.Fold.Types
-    ( Fold (..)
+    ( Step (..)
+    , stepWS
+    , doneWS
+    , initialTS
+    , initialTSM
+    , Fold (..)
 {-
     , Fold2 (..)
     , simplify
@@ -58,6 +63,23 @@ import Streamly.Internal.Data.SVar (MonadAsync)
 -- Monadic left folds
 ------------------------------------------------------------------------------
 
+-- {-# ANN type Step Fuse #-}
+data Step s b = Yield s | Stop b
+
+{-# INLINE fmap1 #-}
+fmap1 :: (a -> b) -> Step a x -> Step b x
+fmap1 f (Yield a) = Yield (f a)
+fmap1 _ (Stop x) = Stop x
+
+{-# INLINE fmap2 #-}
+fmap2 :: (a -> b) -> Step x a -> Step x b
+fmap2 f (Stop a) = Stop (f a)
+fmap2 _ (Yield x) = Yield x
+
+instance Functor (Step s) where
+    {-# INLINE fmap #-}
+    fmap = fmap2
+
 -- | Represents a left fold over an input stream of values of type @a@ to a
 -- single value of type @b@ in 'Monad' @m@.
 --
@@ -70,7 +92,26 @@ import Streamly.Internal.Data.SVar (MonadAsync)
 
 data Fold m a b =
   -- | @Fold @ @ step @ @ initial @ @ extract@
-  forall s. Fold (s -> a -> m s) (m s) (s -> m b)
+  forall s. Fold (s -> a -> m (Step s b)) (m s) (s -> m b)
+
+{-# INLINE stepWS #-}
+stepWS :: Monad m => (s -> a -> m (Step s b)) -> Step s b -> a -> m (Step s b)
+stepWS step (Yield s) a = step s a
+stepWS _ x _ = return x
+
+{-# INLINE doneWS #-}
+doneWS :: Monad m => (s -> m b) -> Step s b -> m b
+doneWS _ (Stop b) = return b
+doneWS done (Yield s) = done s
+
+{-# INLINE initialTS #-}
+initialTS :: s -> Step s b
+initialTS = Yield
+
+{-# INLINE initialTSM #-}
+initialTSM :: Monad m => m s -> m (Step s b)
+initialTSM = fmap Yield
+
 {-
 -- Experimental type to provide a side input to the fold for generating the
 -- initial state. For example, if we have to fold chunks of a stream and write
@@ -358,7 +399,10 @@ runStep :: Monad m => Fold m a b -> a -> m (Fold m a b)
 runStep (Fold step initial extract) a = do
     i <- initial
     r <- step i a
-    return $ (Fold step (return r) extract)
+    case r of
+        Yield s -> return $ Fold step (return s) extract
+        Stop b -> return $ Fold (\_ _ -> return $ Stop b) initial (\_ -> return b)
+
 
 ------------------------------------------------------------------------------
 -- Parsing
@@ -377,23 +421,25 @@ lchunksOf n (Fold step1 initial1 extract1) (Fold step2 initial2 extract2) =
 
     where
 
-    initial' = (Tuple3' 0) <$> initial1 <*> initial2
+    initial' = (Tuple3' 0) <$> initialTSM initial1 <*> initialTSM initial2
     step' (Tuple3' i r1 r2) a = do
         if i < n
         then do
-            res <- step1 r1 a
-            return $ Tuple3' (i + 1) res r2
+            res <- stepWS step1 r1 a
+            return $ Yield $ Tuple3' (i + 1) res r2
         else do
-            res <- extract1 r1
-            acc2 <- step2 r2 res
-
-            i1 <- initial1
-            acc1 <- step1 i1 a
-            return $ Tuple3' 1 acc1 acc2
+            res <- doneWS extract1 r1
+            acc2 <- stepWS step2 r2 res
+            case acc2 of
+                Stop b -> return $ Stop b
+                Yield _ -> do
+                    i1 <- initial1
+                    acc1 <- step1 i1 a
+                    return $ Yield $ Tuple3' 1 acc1 acc2
     extract' (Tuple3' _ r1 r2) = do
-        res <- extract1 r1
-        acc2 <- step2 r2 res
-        extract2 acc2
+        res <- doneWS extract1 r1
+        acc2 <- stepWS step2 r2 res
+        doneWS extract2 acc2
 {-
 {-# INLINE lchunksOf2 #-}
 lchunksOf2 :: Monad m => Int -> Fold m a b -> Fold2 m x b c -> Fold2 m x a c

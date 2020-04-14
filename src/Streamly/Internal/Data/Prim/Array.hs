@@ -68,6 +68,7 @@ import Streamly.Internal.Data.Stream.StreamK.Type (IsStream)
 import Streamly.Internal.Data.Stream.Serial (SerialT)
 
 import qualified Streamly.Internal.Data.Stream.StreamD as D
+import qualified Streamly.Internal.Data.Fold.Types as FL
 
 {-# INLINE_NORMAL toStreamD #-}
 toStreamD :: (Prim a, Monad m) => PrimArray a -> D.Stream m a
@@ -108,10 +109,10 @@ writeN limit = Fold step initial extract
         marr <- liftIO $ newPrimArray limit
         return (marr, 0)
     step (marr, i) x
-        | i == limit = return (marr, i)
+        | i == limit = fmap FL.Stop $ liftIO $ unsafeFreezePrimArray marr
         | otherwise = do
             liftIO $ writePrimArray marr i x
-            return (marr, i + 1)
+            return $ FL.Yield $ (marr, i + 1)
     extract (marr, _) = liftIO $ unsafeFreezePrimArray marr
 
 {-# INLINE_NORMAL write #-}
@@ -126,10 +127,10 @@ write = Fold step initial extract
             let newCapacity = max (capacity * 2) 1
              in do newMarr <- liftIO $ resizeMutablePrimArray marr newCapacity
                    liftIO $ writePrimArray newMarr i x
-                   return (newMarr, i + 1, newCapacity)
+                   return $ FL.Yield $ (newMarr, i + 1, newCapacity)
         | otherwise = do
             liftIO $ writePrimArray marr i x
-            return (marr, i + 1, capacity)
+            return $ FL.Yield $ (marr, i + 1, capacity)
     extract (marr, len, _) = do liftIO $ shrinkMutablePrimArray marr len
                                 liftIO $ unsafeFreezePrimArray marr
 

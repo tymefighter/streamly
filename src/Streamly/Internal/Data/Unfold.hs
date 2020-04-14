@@ -154,6 +154,7 @@ import qualified Control.Monad.Catch as MC
 import qualified Data.Tuple as Tuple
 import qualified Streamly.Internal.Data.Stream.StreamK as K
 import qualified Streamly.Internal.Data.Stream.StreamD as D
+import qualified Streamly.Internal.Data.Fold.Types as FL
 
 -------------------------------------------------------------------------------
 -- Input operations
@@ -269,7 +270,9 @@ fold (Unfold ustep inject) (Fold fstep initial extract) a =
         case r of
             Yield x s -> do
                 acc' <- fstep acc x
-                go SPEC acc' s
+                case acc' of
+                    FL.Yield acc'' -> go SPEC acc'' s
+                    FL.Stop c -> return c
             Skip s -> go SPEC acc s
             Stop   -> extract acc
 

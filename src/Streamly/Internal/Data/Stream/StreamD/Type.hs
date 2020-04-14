@@ -78,8 +78,9 @@ import Fusion.Plugin.Types (Fuse(..))
 
 import Streamly.Internal.Data.SVar (State(..), adaptState, defState)
 -- import Streamly.Internal.Data.Fold.Types (Fold(..), Fold2(..))
-import Streamly.Internal.Data.Fold.Types (Fold(..))
+import Streamly.Internal.Data.Fold.Types (Fold(..), initialTSM, stepWS, doneWS)
 
+import qualified Streamly.Internal.Data.Fold.Types as FL
 import qualified Streamly.Internal.Data.Stream.StreamK as K
 
 ------------------------------------------------------------------------------
@@ -427,7 +428,7 @@ toListId s = Identity $ build (\c n -> toListFB c n s)
 
 -- XXX run begin action only if the stream is not empty.
 {-# INLINE_NORMAL foldlMx' #-}
-foldlMx' :: Monad m => (x -> a -> m x) -> m x -> (x -> m b) -> Stream m a -> m b
+foldlMx' :: Monad m => (x -> a -> m (FL.Step x b)) -> m x -> (x -> m b) -> Stream m a -> m b
 foldlMx' fstep begin done (Stream step state) =
     begin >>= \x -> go SPEC x state
   where
@@ -438,12 +439,14 @@ foldlMx' fstep begin done (Stream step state) =
         case r of
             Yield x s -> do
                 acc' <- fstep acc x
-                go SPEC acc' s
+                case acc' of
+                    FL.Stop b -> return b
+                    FL.Yield acc'' -> go SPEC acc'' s
             Skip s -> go SPEC acc s
             Stop   -> done acc
 
 {-# INLINE foldlx' #-}
-foldlx' :: Monad m => (x -> a -> x) -> x -> (x -> b) -> Stream m a -> m b
+foldlx' :: Monad m => (x -> a -> FL.Step x b) -> x -> (x -> b) -> Stream m a -> m b
 foldlx' fstep begin done m =
     foldlMx' (\b a -> return (fstep b a)) (return begin) (return . done) m
 
@@ -581,14 +584,14 @@ groupsOf n (Fold fstep initial extract) (Stream step state) =
             error $ "Streamly.Internal.Data.Stream.StreamD.Type.groupsOf: the size of "
                  ++ "groups [" ++ show n ++ "] must be a natural number"
         -- fs = fold state
-        fs <- initial
+        fs <- initialTSM initial
         return $ Skip (GroupBuffer st fs 0)
 
     step' gst (GroupBuffer st fs i) = do
         r <- step (adaptState gst) st
         case r of
             Yield x s -> do
-                !fs' <- fstep fs x
+                !fs' <- stepWS fstep fs x
                 let i' = i + 1
                 return $
                     if i' >= n
@@ -598,7 +601,7 @@ groupsOf n (Fold fstep initial extract) (Stream step state) =
             Stop -> return $ Skip (GroupYield fs GroupFinish)
 
     step' _ (GroupYield fs next) = do
-        r <- extract fs
+        r <- doneWS extract fs
         return $ Yield r next
 
     step' _ GroupFinish = return Stop
