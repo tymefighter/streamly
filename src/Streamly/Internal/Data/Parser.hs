@@ -2,10 +2,8 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-#include "inline.hs"
-
 -- |
--- Module      : Streamly.Internal.Data.Parser.ParserD
+-- Module      : Streamly.Internal.Data.Parser
 -- Copyright   : (c) 2020 Composewell Technologies
 -- License     : BSD3
 -- Maintainer  : streamly@composewell.com
@@ -38,18 +36,17 @@
 -- "Text.ParserCombinators.ReadP/parser-combinators/parsec/megaparsec/attoparsec"
 -- have consistent names. takeP/takeWhileP/munch?
 
-module Streamly.Internal.Data.Parser.ParserD
+module Streamly.Internal.Data.Parser
     (
-      Parser (..)
-    , ParseError (..)
-    , Step (..)
+      K.Parser (..)
+    , D.ParseError (..)
+    , D.Step (..)
 
     -- First order parsers
     -- * Accumulators
     , fromFold
-    , toParserK
-    , fromParserK
     , any
+    {-
     , all
     , yield
     , yieldM
@@ -178,6 +175,7 @@ module Streamly.Internal.Data.Parser.ParserD
     -- , retryMax    -- try N times
     -- , retryUntil  -- try until successful
     -- , retryUntilN -- try until successful n times
+    -}
     )
 where
 
@@ -187,12 +185,13 @@ import Prelude
        hiding (any, all, take, takeWhile, sequence)
 
 import Streamly.Internal.Data.Fold.Types (Fold(..))
+import Streamly.Internal.Data.Parser.ParserK.Types (Parser)
 
+import qualified Streamly.Internal.Data.Parser.ParserD as D
+import qualified Streamly.Internal.Data.Parser.ParserD.Tee as D
 import qualified Streamly.Internal.Data.Parser.ParserK.Types as K
 import qualified Streamly.Internal.Data.Zipper as Z
 
-import Streamly.Internal.Data.Parser.ParserD.Tee
-import Streamly.Internal.Data.Parser.ParserD.Types
 import Streamly.Internal.Data.Strict
 
 -------------------------------------------------------------------------------
@@ -202,39 +201,8 @@ import Streamly.Internal.Data.Strict
 -- | The resulting parse never terminates and never errors out.
 --
 {-# INLINE fromFold #-}
-fromFold :: Monad m => Fold m a b -> Parser m a b
-fromFold (Fold fstep finitial fextract) = Parser step finitial fextract
-
-    where
-
-    step s a = Yield 0 <$> fstep s a
-
--------------------------------------------------------------------------------
--- Convert to and from CPS style parser representation
--------------------------------------------------------------------------------
-
-{-# INLINE_LATE toParserK #-}
-toParserK :: MonadCatch m => Parser m a b -> K.Parser m a b
-toParserK (Parser step initial extract) =
-    K.MkParser $ \inp yieldk ->
-        Z.parse step initial extract inp >>= yieldk
-
-{-# NOINLINE fromParserK #-}
-fromParserK :: Monad m => K.Parser m a b -> Parser m a b
-fromParserK _ = Parser step initial extract
-
-    where
-
-    initial = return ()
-    step () _ = error "fromParserK: unimplemented"
-    extract () = error "fromParserK: unimplemented"
-
-#ifndef DISABLE_FUSION
-{-# RULES "fromParserK/toParserK fusion" [2]
-    forall s. toParserK (fromParserK s) = s #-}
-{-# RULES "toParserK/fromParserK fusion" [2]
-    forall s. fromParserK (toParserK s) = s #-}
-#endif
+fromFold :: MonadCatch m => Fold m a b -> Parser m a b
+fromFold = D.toParserK . D.fromFold
 
 -------------------------------------------------------------------------------
 -- Terminating but not failing folds
@@ -245,21 +213,10 @@ fromParserK _ = Parser step initial extract
 -- > Right True
 --
 {-# INLINE any #-}
-any :: Monad m => (a -> Bool) -> Parser m a Bool
-any predicate = Parser step initial return
+any :: MonadCatch m => (a -> Bool) -> Parser m a Bool
+any = D.toParserK . D.any
 
-    where
-
-    initial = return False
-
-    step s a = return $
-        if s
-        then Stop 0 True
-        else
-            if predicate a
-            then Stop 0 True
-            else Yield 0 False
-
+{-
 -- |
 -- >>> S.parse (PR.all (== 0)) $ S.fromList [1,0,1]
 -- > Right False
@@ -903,3 +860,4 @@ manyTill (Fold fstep finitial fextract)
 
     extract (ManyTillL fs sR) = extractL sR >>= fstep fs >>= fextract
     extract (ManyTillR _ fs _) = fextract fs
+    -}

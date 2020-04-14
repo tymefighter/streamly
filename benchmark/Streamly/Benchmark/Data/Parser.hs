@@ -24,7 +24,7 @@ import qualified Control.Applicative as AP
 import qualified Streamly as S hiding (runStream)
 import qualified Streamly.Prelude  as S
 import qualified Streamly.Internal.Data.Fold as FL
-import qualified Streamly.Internal.Data.Parser.ParserD as PR
+import qualified Streamly.Internal.Data.Parser as PR
 import qualified Streamly.Internal.Prelude as IP
 
 import Gauge
@@ -62,9 +62,10 @@ benchIOSink value name f =
 -------------------------------------------------------------------------------
 
 {-# INLINE any #-}
-any :: (MonadThrow m, Ord a) => a -> SerialT m a -> m Bool
-any value = IP.parseD (PR.any (> value))
+any :: (MonadCatch m, Ord a) => a -> SerialT m a -> m Bool
+any value = IP.parse (PR.any (> value))
 
+{-
 {-# INLINE all #-}
 all :: (MonadThrow m, Ord a) => a -> SerialT m a -> m Bool
 all value = IP.parseD (PR.all (<= value))
@@ -167,6 +168,7 @@ choice :: MonadCatch m => Int -> SerialT m Int -> m Int
 choice value = do
     IP.parseD (asum (replicate value (PR.satisfy (< 0)))
         AP.<|> PR.satisfy (> 0))
+    -}
 
 -------------------------------------------------------------------------------
 -- Benchmarks
@@ -175,7 +177,7 @@ choice value = do
 o_1_space_serial_parse :: Int -> [Benchmark]
 o_1_space_serial_parse value =
     [ benchIOSink value "any" $ any value
-    , benchIOSink value "all" $ all value
+    {-, benchIOSink value "all" $ all value
     , benchIOSink value "take" $ take value
     , benchIOSink value "takeWhile" $ takeWhile value
     , benchIOSink value "split (all,any)" $ splitAllAny value
@@ -188,8 +190,10 @@ o_1_space_serial_parse value =
     , benchIOSink value "longest (all,any)" $ longestAllAny value
     , benchIOSink value "sequenceA/100" $ sequenceA (value `div` 100)
     , benchIOSink value "sequence/100" $ sequence (value `div` 100)
+    -}
     ]
 
+{-
 o_1_heap_serial_parse :: Int -> [Benchmark]
 o_1_heap_serial_parse value =
     [ benchIOSink value "lookAhead" $ lookAhead value
@@ -197,6 +201,7 @@ o_1_heap_serial_parse value =
     , benchIOSink value "someAlt" someAlt
     , benchIOSink value "manyTill" $ manyTill value
     ]
+    -}
 
 -------------------------------------------------------------------------------
 -- Driver
@@ -216,10 +221,12 @@ main = do
                   o_1_space_serial_parse value
                 ]
             ]
+            {-
         , bgroup "o-n-heap"
             [ bgroup "parser" $ concat
                 [
                   o_1_heap_serial_parse value
                 ]
             ]
+            -}
         ]
