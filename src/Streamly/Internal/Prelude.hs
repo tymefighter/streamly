@@ -1223,7 +1223,7 @@ parseK parser xs = do
 --
 -- /Internal/
 --
-{-# INLINE [3] parse #-}
+{-# INLINE_EARLY parse #-}
 parse :: MonadThrow m => Parser m a b -> SerialT m a -> m b
 parse = parseD . PRD.fromParserK
 -- {-# RULES "parse fallback to CPS" [1]
