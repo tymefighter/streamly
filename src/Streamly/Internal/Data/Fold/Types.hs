@@ -123,26 +123,33 @@ data Fold2 m c a b =
 -- | Convert more general type 'Fold2' into a simpler type 'Fold'
 simplify :: Fold2 m c a b -> c -> Fold m a b
 simplify (Fold2 step inject extract) c = Fold step (inject c) extract
-
+-}
 -- | Maps a function on the output of the fold (the type @b@).
-instance Functor m => Functor (Fold m a) where
+instance Monad m => Functor (Fold m a) where
     {-# INLINE fmap #-}
-    fmap f (Fold step start done) = Fold step start done'
+    fmap f (Fold step start done) = Fold step' start done'
         where
+        step' x a = do
+            res <- step x a
+            case res of
+                Yield s -> return $ Yield s
+                Stop b -> return $ Stop (f b)
         done' x = fmap f $! done x
 
 -- | The fold resulting from '<*>' distributes its input to both the argument
 -- folds and combines their output using the supplied function.
-instance Applicative m => Applicative (Fold m a) where
+instance Monad m => Applicative (Fold m a) where
     {-# INLINE pure #-}
-    pure b = Fold (\() _ -> pure ()) (pure ()) (\() -> pure b)
-
+    pure b = Fold (\() _ -> pure $ Stop b) (pure ()) (\() -> pure b)
     {-# INLINE (<*>) #-}
     (Fold stepL beginL doneL) <*> (Fold stepR beginR doneR) =
-        let step (Tuple' xL xR) a = Tuple' <$> stepL xL a <*> stepR xR a
-            begin = Tuple' <$> beginL <*> beginR
-            done (Tuple' xL xR) = doneL xL <*> doneR xR
-        in  Fold step begin done
+        let combine (Stop dL) (Stop dR) = Stop $ dL dR
+            combine sl sr = Yield $ Tuple' sl sr
+            step (Tuple' xL xR) a =
+                combine <$> stepWS stepL xL a <*> stepWS stepR xR a
+            begin = Tuple' <$> initialTSM beginL <*> initialTSM beginR
+            done (Tuple' xL xR) = doneWS doneL xL <*> doneWS doneR xR
+         in Fold step begin done
 
 -- | Combines the outputs of the folds (the type @b@) using their 'Semigroup'
 -- instances.
@@ -248,7 +255,7 @@ instance (Monad m, Floating b) => Floating (Fold m a b) where
 
     {-# INLINE logBase #-}
     logBase = liftA2 logBase
-
+{-
 ------------------------------------------------------------------------------
 -- Internal APIs
 ------------------------------------------------------------------------------
