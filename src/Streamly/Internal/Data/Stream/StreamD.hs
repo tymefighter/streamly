@@ -317,7 +317,7 @@ module Streamly.Internal.Data.Stream.StreamD
     , mkParallelD
     , newCallbackStream
 
---    , lastN
+    , lastN
     )
 where
 
@@ -4340,7 +4340,7 @@ tapAsync f (Stream step1 state1) = Stream step TapInit
             Yield a s -> Yield a (TapDone s)
             Skip s    -> Skip (TapDone s)
             Stop      -> Stop
-{-
+
 -- XXX Exported from Array again as this fold is specific to Array
 -- | Take last 'n' elements from the stream and discard the rest.
 {-# INLINE lastN #-}
@@ -4351,7 +4351,7 @@ lastN n
   where
     step (Tuple3' rb rh i) a = do
         rh1 <- liftIO $ RB.unsafeInsert rb rh a
-        return $ Tuple3' rb rh1 (i + 1)
+        return $ FL.Yield $ Tuple3' rb rh1 (i + 1)
     initial = fmap (\(a, b) -> Tuple3' a b (0 :: Int)) $ liftIO $ RB.new n
     done (Tuple3' rb rh i) = do
         arr <- liftIO $ A.newArray n
@@ -4360,7 +4360,7 @@ lastN n
     foldFunc i
         | i < n = RB.unsafeFoldRingM
         | otherwise = RB.unsafeFoldRingFullM
--}
+
 ------------------------------------------------------------------------------
 -- Time related
 ------------------------------------------------------------------------------
