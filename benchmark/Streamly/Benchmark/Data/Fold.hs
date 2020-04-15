@@ -67,7 +67,6 @@ o_1_space_serial_folds value =
           [ bgroup
                 "folds"
                 [ benchIOSink value "drain" (S.fold FL.drain)
-{-
                 , benchIOSink value "drainN" (S.fold (IFL.drainN value))
                 , benchIOSink
                       value
@@ -131,10 +130,8 @@ o_1_space_serial_folds value =
                 , benchIOSink value "null" (S.fold FL.null)
                 , benchIOSink value "elem" (S.fold (FL.elem (value + 1)))
                 , benchIOSink value "notElem" (S.fold (FL.notElem (value + 1)))
-                -}
                 , benchIOSink value "all" (S.fold (FL.all (<= (value + 1))))
-                , benchIOSink value "any" (S.fold (FL.any (> (value + 1)))) ]
-                {-
+                , benchIOSink value "any" (S.fold (FL.any (> (value + 1))))
                 , benchIOSink
                       value
                       "and"
@@ -144,11 +141,10 @@ o_1_space_serial_folds value =
                       "or"
                       (\s -> S.fold FL.or (S.map (> (value + 1)) s))
                 ]
-                -}
           ]
     ]
 
-{-
+
 o_1_space_serial_foldsTransforms :: Int -> [Benchmark]
 o_1_space_serial_foldsTransforms value =
     [ bgroup
@@ -208,7 +204,7 @@ o_n_heap_serial_folds value =
                 ]
           ]
     ]
--}
+
 -------------------------------------------------------------------------------
 -- Driver
 -------------------------------------------------------------------------------
@@ -224,13 +220,11 @@ main = do
           [ bgroup "fold" $
             concat
               [ o_1_space_serial_folds value
---              , o_1_space_serial_foldsTransforms value
---              , o_1_space_serial_foldsCompositions value
+              , o_1_space_serial_foldsTransforms value
+              , o_1_space_serial_foldsCompositions value
               ]
           ]
-{-
       , bgroup
           "o-n-heap"
           [bgroup "fold" $ concat [o_n_heap_serial_folds value]]
--}
       ]
