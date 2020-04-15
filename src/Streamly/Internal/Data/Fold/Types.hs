@@ -412,7 +412,7 @@ runStep (Fold step initial extract) a = do
     r <- step i a
     case r of
         Yield s -> return $ Fold step (return s) extract
-        Stop b -> return $ Fold (\_ _ -> return $ Stop b) initial (\_ -> return b)
+        Stop b -> return $ Fold (\_ _ -> return $ Stop b) (return i) (\_ -> return b)
 
 
 ------------------------------------------------------------------------------
