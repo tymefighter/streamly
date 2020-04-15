@@ -41,7 +41,6 @@ module Streamly.Internal.Data.Fold
     -- ** Full Folds
     , drain
     , drainBy
-
     , drainBy2
     , last
     , length
@@ -87,10 +86,8 @@ module Streamly.Internal.Data.Fold
     , elem
     , notElem
     -- XXX these are slower than right folds even when full input is used
-
     , all
     , any
-
     , and
     , or
 
@@ -1553,7 +1550,6 @@ foldChunks = undefined
 -- | Group the input stream into groups of elements between @low@ and @high@.
 -- Collection starts in chunks of @low@ and then keeps doubling until we reach
 -- @high@. Each chunk is folded using the provided fold function.
-
 --
 -- This could be useful, for example, when we are folding a stream of unknown
 -- size to a stream of arrays and we want to minimize the number of
