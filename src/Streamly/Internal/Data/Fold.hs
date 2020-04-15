@@ -355,14 +355,14 @@ transform (Pipe pstep1 pstep2 pinitial) (Fold fstep finitial fextract) =
             acc' <- fstep acc b
             case acc' of
                 Yield s -> return $ Yield $ Tuple' ps' s
-                Stop b -> return $ Stop b
+                Stop b2 -> return $ Stop b2
 
         go acc (Pipe.Yield b (Produce ps')) = do
             acc' <- fstep acc b
             r <- pstep2 ps'
             case acc' of
                 Yield s -> go s r
-                Stop b -> return $ Stop b
+                Stop b2 -> return $ Stop b2
 
         go acc (Pipe.Continue (Consume ps')) = return $ Yield $ Tuple' ps' acc
 
@@ -731,11 +731,13 @@ lookup a0 = Fold step (return ()) (const (return Nothing))
                             then Stop $ Just b
                             else Yield ()
 
+{-
 -- | Convert strict 'Either'' to lazy 'Maybe'
 {-# INLINABLE hush #-}
 hush :: Either' a b -> Maybe b
 hush (Left'  _) = Nothing
 hush (Right' b) = Just b
+-}
 
 -- | Returns the first index that satisfies the given predicate.
 --
@@ -1196,7 +1198,7 @@ partitionByM f (Fold stepL beginL doneL) (Fold stepR beginR doneR) =
     where
 
     begin = Tuple' <$> initialTSM beginL <*> initialTSM beginR
-    step (Tuple' (Stop x) (Stop y)) a = return $ Stop (x, y)
+    step (Tuple' (Stop x) (Stop y)) _ = return $ Stop (x, y)
     step (Tuple' xL xR) a = do
         r <- f a
         case r of

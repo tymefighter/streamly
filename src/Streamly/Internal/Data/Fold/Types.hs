@@ -54,7 +54,7 @@ import Data.Maybe (isJust, fromJust)
 #if __GLASGOW_HASKELL__ < 808
 import Data.Semigroup (Semigroup(..))
 #endif
-import Streamly.Internal.Data.Strict (Tuple'(..), Tuple3'(..), Either'(..))
+import Streamly.Internal.Data.Strict (Tuple'(..), Tuple3'(..))
 import Streamly.Internal.Data.SVar (MonadAsync)
 
 ------------------------------------------------------------------------------
