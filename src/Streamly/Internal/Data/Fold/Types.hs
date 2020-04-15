@@ -13,16 +13,18 @@
 
 module Streamly.Internal.Data.Fold.Types
     ( Step (..)
+    , fmap1
+    , fmap2
     , stepWS
     , doneWS
     , initialTS
     , initialTSM
     , Fold (..)
-{-
+
     , Fold2 (..)
     , simplify
     , toListRevF  -- experimental
--}
+
     , lmap
     , lmapM
     , lfilter
@@ -32,11 +34,9 @@ module Streamly.Internal.Data.Fold.Types
     , ltakeWhile
     , lsessionsOf
     , lchunksOf
-{-
     , lchunksOf2
 
     , duplicate
--}
     , initialize
     , runStep
     )
@@ -110,7 +110,7 @@ initialTS = Yield
 initialTSM :: Monad m => m s -> m (Step s b)
 initialTSM = fmap Yield
 
-{-
+
 -- Experimental type to provide a side input to the fold for generating the
 -- initial state. For example, if we have to fold chunks of a stream and write
 -- each chunk to a different file, then we can generate the file name using a
@@ -121,9 +121,10 @@ data Fold2 m c a b =
   forall s. Fold2 (s -> a -> m s) (c -> m s) (s -> m b)
 
 -- | Convert more general type 'Fold2' into a simpler type 'Fold'
-simplify :: Fold2 m c a b -> c -> Fold m a b
-simplify (Fold2 step inject extract) c = Fold step (inject c) extract
--}
+simplify :: Functor m => Fold2 m c a b -> c -> Fold m a b
+simplify (Fold2 step inject extract) c =
+    Fold (\x a -> Yield <$> step x a) (inject c) extract
+
 -- | Maps a function on the output of the fold (the type @b@).
 instance Monad m => Functor (Fold m a) where
     {-# INLINE fmap #-}
@@ -255,7 +256,7 @@ instance (Monad m, Floating b) => Floating (Fold m a b) where
 
     {-# INLINE logBase #-}
     logBase = liftA2 logBase
-{-
+
 ------------------------------------------------------------------------------
 -- Internal APIs
 ------------------------------------------------------------------------------
@@ -273,8 +274,8 @@ instance (Monad m, Floating b) => Floating (Fold m a b) where
 --  xn : ... : x2 : x1 : []
 {-# INLINABLE toListRevF #-}
 toListRevF :: Monad m => Fold m a [a]
-toListRevF = Fold (\xs x -> return $ x:xs) (return []) return
--}
+toListRevF = Fold (\xs x -> return $ Yield $ x:xs) (return []) return
+
 -- | @(lmap f fold)@ maps the function @f@ on the input of the fold.
 --
 -- >>> S.fold (FL.lmap (\x -> x * x) FL.sum) (S.enumerateFromTo 1 100)
@@ -365,8 +366,6 @@ ltakeWhile predicate (Fold step initial done) = Fold step' initial done
         then step r a
         else Stop <$> done r
 
-
-{-
 ------------------------------------------------------------------------------
 -- Nesting
 ------------------------------------------------------------------------------
@@ -383,11 +382,18 @@ ltakeWhile predicate (Fold step initial done) = Fold step' initial done
 -- > 465
 --
 -- @since 0.7.0
+-- XXX Is this correct?
 {-# INLINABLE duplicate #-}
-duplicate :: Applicative m => Fold m a b -> Fold m a (Fold m a b)
+duplicate :: Monad m => Fold m a b -> Fold m a (Fold m a b)
 duplicate (Fold step begin done) =
-    Fold step begin (\x -> pure (Fold step (pure x) done))
--}
+    Fold step' begin (\x -> pure (Fold step (pure x) done))
+    where
+      step' x a = do
+          res <- step x a
+          case res of
+              Yield s -> pure $ Yield s
+              Stop _ -> pure $ Stop $ Fold step (pure x) done
+
 -- | Run the initialization effect of a fold. The returned fold would use the
 -- value returned by this effect as its initial value.
 --
@@ -445,7 +451,7 @@ lchunksOf n (Fold step1 initial1 extract1) (Fold step2 initial2 extract2) =
         res <- doneWS extract1 r1
         acc2 <- stepWS step2 r2 res
         doneWS extract2 acc2
-{-
+
 {-# INLINE lchunksOf2 #-}
 lchunksOf2 :: Monad m => Int -> Fold m a b -> Fold2 m x b c -> Fold2 m x a c
 lchunksOf2 n (Fold step1 initial1 extract1) (Fold2 step2 inject2 extract2) =
@@ -453,24 +459,24 @@ lchunksOf2 n (Fold step1 initial1 extract1) (Fold2 step2 inject2 extract2) =
 
     where
 
-    inject' x = (Tuple3' 0) <$> initial1 <*> inject2 x
+    inject' x = (Tuple3' 0) <$> initialTSM initial1 <*> inject2 x
     step' (Tuple3' i r1 r2) a = do
         if i < n
         then do
-            res <- step1 r1 a
+            res <- stepWS step1 r1 a
             return $ Tuple3' (i + 1) res r2
         else do
-            res <- extract1 r1
+            res <- doneWS extract1 r1
             acc2 <- step2 r2 res
 
             i1 <- initial1
             acc1 <- step1 i1 a
             return $ Tuple3' 1 acc1 acc2
     extract' (Tuple3' _ r1 r2) = do
-        res <- extract1 r1
+        res <- doneWS extract1 r1
         acc2 <- step2 r2 res
         extract2 acc2
--}
+
 -- | Group the input stream into windows of n second each and then fold each
 -- group using the provided fold function.
 --
